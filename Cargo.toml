@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "core/master_orchestrator",
+    "core/shared_types",
+    "agents/git_agent",
+    "agents/obsidian_agent",
+    "agents/llm_router_agent",
+]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+tokio = { version = "1.0", features = ["full"] }
+rusqlite = { version = "0.30", features = ["bundled"] }
