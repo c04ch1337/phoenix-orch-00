@@ -1,0 +1,32 @@
+[llm]
+default_provider = "openrouter"
+
+[llm.openrouter]
+api_key = "{{OPENROUTER_API_KEY}}"
+model_name = "anthropic/claude-3.5-sonnet"
+base_url = "https://openrouter.ai/api/v1"
+
+[llm.gemini]
+api_key = "{{GEMINI_API_KEY}}"
+model_name = "gemini-pro"
+base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+
+[llm.grok]
+api_key = "{{GROK_API_KEY}}"
+model_name = "grok-1"
+
+[llm.openai]
+api_key = "{{OPENAI_API_KEY}}"
+model_name = "gpt-4o"
+
+[llm.anthropic]
+api_key = "{{ANTHROPIC_API_KEY}}"
+model_name = "claude-3-opus-20240229"
+
+[llm.ollama]
+base_url = "http://localhost:11434"
+model_name = "llama3"
+
+[llm.lmstudio]
+base_url = "http://localhost:1234/v1"
+model_name = "local-model"

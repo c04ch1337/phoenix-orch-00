@@ -1,0 +1,5 @@
+/target
+*.o
+/data/*.db
+/data/*.bin
+.env
