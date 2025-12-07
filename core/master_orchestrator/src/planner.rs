@@ -41,6 +41,55 @@ fn agent_in_circuit_cooldown(
     false
 }
 
+/// Simple heuristic to estimate token count (approx 4 chars per token).
+/// This is not perfect but sufficient for a rough guardrail.
+fn estimate_tokens(text: &str) -> usize {
+    text.len() / 4
+}
+
+/// Truncates the context string to fit within the available token budget.
+/// Returns the truncated context and a boolean indicating if truncation occurred.
+fn truncate_context_to_fit(
+    context: &str,
+    user_message: &str,
+    max_input_tokens: u32,
+) -> (String, bool) {
+    let user_tokens = estimate_tokens(user_message);
+    let safety_margin = 100; // Buffer for system prompts, etc.
+    
+    if user_tokens + safety_margin >= max_input_tokens as usize {
+        // User message alone is too big or close to limit. 
+        // We can't do much about the user message here without altering intent,
+        // so we just return empty context.
+        return (String::new(), !context.is_empty());
+    }
+
+    let available_tokens = max_input_tokens as usize - user_tokens - safety_margin;
+    let context_tokens = estimate_tokens(context);
+
+    if context_tokens <= available_tokens {
+        (context.to_string(), false)
+    } else {
+        // Simple character-based truncation
+        let max_chars = available_tokens * 4;
+        let truncated = if context.len() > max_chars {
+             // Try to keep the *end* of the context if it's a list, or *beginning*?
+             // Usually for RAG, the top hits are most relevant. 
+             // But if it's chat history, recent is better.
+             // Given the current simple implementation (appending lists), 
+             // we'll just take the first N characters for now to ensure we include *some* top results.
+             // A better strategy might be to filter the list of facts/memories *before* joining.
+             // For now, simple char truncation.
+             let mut s = context[..max_chars].to_string();
+             s.push_str("\n...[truncated due to length]...");
+             s
+        } else {
+            context.to_string()
+        };
+        (truncated, true)
+    }
+}
+
 // Planner's main job: turn user intent into an ActionRequest
 // This is the legacy entrypoint used by /api/chat and remains for backward compatibility.
 pub async fn plan_and_execute(
@@ -120,9 +169,21 @@ pub async fn plan_and_execute(
         };
 
         if let Some(config) = provider_config {
+            let max_input_tokens = config.max_input_tokens.unwrap_or(128_000); // Default to a large window if not set
+            
+            let (final_context, truncated) = if !context_str.is_empty() {
+                truncate_context_to_fit(&context_str, &user_message, max_input_tokens)
+            } else {
+                (String::new(), false)
+            };
+
+            if truncated {
+                println!("Warning: Context was truncated to fit max_input_tokens={}", max_input_tokens);
+            }
+
             // Append context to the prompt for the LLM
-            let final_prompt = if !context_str.is_empty() {
-                format!("{}\n\nContext:\n{}", user_message, context_str)
+            let final_prompt = if !final_context.is_empty() {
+                format!("{}\n\nContext:\n{}", user_message, final_context)
             } else {
                 user_message.clone()
             };
@@ -394,9 +455,21 @@ pub async fn plan_and_execute_v1(
         };
 
         if let Some(config) = provider_config {
+            let max_input_tokens = config.max_input_tokens.unwrap_or(128_000); // Default to a large window if not set
+            
+            let (final_context, truncated) = if !context_str.is_empty() {
+                truncate_context_to_fit(&context_str, &user_message, max_input_tokens)
+            } else {
+                (String::new(), false)
+            };
+
+            if truncated {
+                println!("Warning: Context was truncated to fit max_input_tokens={}", max_input_tokens);
+            }
+
             // Append context to the prompt for the LLM
-            let final_prompt = if !context_str.is_empty() {
-                format!("{}\n\nContext:\n{}", user_message, context_str)
+            let final_prompt = if !final_context.is_empty() {
+                format!("{}\n\nContext:\n{}", user_message, final_context)
             } else {
                 user_message.clone()
             };
@@ -590,5 +663,39 @@ mod tests {
             AgentHealthState::Unhealthy,
             &Some(past)
         ));
+    }
+
+    #[test]
+    fn test_estimate_tokens() {
+        assert_eq!(estimate_tokens("1234"), 1);
+        assert_eq!(estimate_tokens("12345678"), 2);
+        assert_eq!(estimate_tokens(""), 0);
+    }
+
+    #[test]
+    fn test_truncate_context_to_fit() {
+        let user_msg = "Hello"; // 5 chars -> 1 token
+        let context = "This is a long context string that needs to be truncated."; // 57 chars -> 14 tokens
+        
+        // Case 1: Fits comfortably
+        // Max 1000 tokens. User=1, Safety=100. Available=899. Context=14.
+        let (truncated, was_truncated) = truncate_context_to_fit(context, user_msg, 1000);
+        assert_eq!(truncated, context);
+        assert!(!was_truncated);
+
+        // Case 2: Needs truncation
+        // Max 105 tokens. User=1, Safety=100. Available=4 tokens (16 chars).
+        let (truncated, was_truncated) = truncate_context_to_fit(context, user_msg, 105);
+        assert!(was_truncated);
+        assert!(truncated.contains("...[truncated due to length]..."));
+        assert!(truncated.len() < context.len());
+        // 16 chars max + suffix
+        assert_eq!(truncated, "This is a long c\n...[truncated due to length]...");
+
+        // Case 3: User message too big
+        // Max 100 tokens. User=1, Safety=100. Available < 0.
+        let (truncated, was_truncated) = truncate_context_to_fit(context, user_msg, 100);
+        assert!(was_truncated);
+        assert_eq!(truncated, "");
     }
 }
