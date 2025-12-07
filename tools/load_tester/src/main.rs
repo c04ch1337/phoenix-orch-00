@@ -14,7 +14,7 @@ use platform::{record_counter, record_histogram};
     about = "Simple HTTP load tester for /api/v1/chat"
 )]
 struct Args {
-    /// Target endpoint (e.g. http://127.0.0.1:8181/api/v1/chat)
+    /// Target endpoint (e.g. http://127.0.0.1:8282/api/v1/chat)
     #[arg(long)]
     endpoint: String,
 

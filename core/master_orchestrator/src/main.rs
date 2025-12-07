@@ -72,7 +72,7 @@ fn run_http_server(
         // 2. Baseline security headers for all HTTP responses.
         let csp_value = "default-src 'self'; \
 script-src 'self' 'unsafe-inline'; \
-connect-src 'self' http://127.0.0.1:8181 http://localhost:8181; \
+connect-src 'self' http://127.0.0.1:8282 http://localhost:8282; \
 img-src 'self' data: https://grainy-gradients.vercel.app; \
 style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; \
 font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; \
@@ -298,7 +298,7 @@ async fn main() -> std::io::Result<()> {
 
     // --- (A) BINDING TO THE PERMANENT PORT ---
     // Bind to both IPv4 and IPv6 localhost interfaces
-    const BIND_ADDRESS: &str = "127.0.0.1:8181";
+    const BIND_ADDRESS: &str = "127.0.0.1:8282";
     println!("🚀 Starting API server on: {}", BIND_ADDRESS);
 
     // Initialize JWT authentication if secret is configured

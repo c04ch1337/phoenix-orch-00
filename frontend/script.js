@@ -1,5 +1,5 @@
-const API_V1_ENDPOINT = 'http://127.0.0.1:8181/api/v1/chat';
-const API_LEGACY_ENDPOINT = 'http://127.0.0.1:8181/api/chat';
+const API_V1_ENDPOINT = 'http://127.0.0.1:8282/api/v1/chat';
+const API_LEGACY_ENDPOINT = 'http://127.0.0.1:8282/api/chat';
 
 // Default to v1; we will transparently fall back to legacy if needed.
 let API_ENDPOINT = API_V1_ENDPOINT;

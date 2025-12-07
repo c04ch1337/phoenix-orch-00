@@ -2,7 +2,7 @@ const { defineConfig } = require('cypress')
 
 module.exports = defineConfig({
     e2e: {
-        baseUrl: 'http://127.0.0.1:8181',
+        baseUrl: 'http://127.0.0.1:8282',
         viewportWidth: 900,
         viewportHeight: 600,
         video: true,

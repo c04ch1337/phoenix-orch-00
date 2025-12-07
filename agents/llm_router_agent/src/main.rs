@@ -116,7 +116,7 @@ async fn call_llm_provider(
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         // OpenRouter specific headers (fine for production)
-        .header("HTTP-Referer", "http://localhost:8181")
+        .header("HTTP-Referer", "http://localhost:8282")
         .header("X-Title", "Twin Orchestrator")
         .json(&body)
         .send()
