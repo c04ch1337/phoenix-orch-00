@@ -1,0 +1,171 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: disaster-recovery
+  namespace: phoenix-orch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: disaster-recovery
+  namespace: phoenix-orch
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: disaster-recovery
+  namespace: phoenix-orch
+subjects:
+  - kind: ServiceAccount
+    name: disaster-recovery
+    namespace: phoenix-orch
+roleRef:
+  kind: Role
+  name: disaster-recovery
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: disaster-recovery-config
+  namespace: phoenix-orch
+data:
+  config.yaml: |
+    schedule:
+      redis_interval_minutes: 15
+      config_interval_minutes: 60
+      state_interval_minutes: 120
+
+    retention:
+      keep_last: 24
+      keep_daily: 7
+      keep_weekly: 4
+      keep_monthly: 3
+
+    storage:
+      s3_bucket: "phoenix-orch-backups"
+      s3_prefix: "backups"
+      region: "us-west-2"
+
+    targets:
+      - name: redis
+        kind: Redis
+        namespace: phoenix-orch
+      - name: master-orchestrator
+        kind: State
+        namespace: phoenix-orch
+      - name: phoenix-orch
+        kind: Config
+        namespace: phoenix-orch
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: disaster-recovery
+  namespace: phoenix-orch
+  labels:
+    app: disaster-recovery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: disaster-recovery
+  template:
+    metadata:
+      labels:
+        app: disaster-recovery
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+    spec:
+      serviceAccountName: disaster-recovery
+      containers:
+        - name: disaster-recovery
+          image: phoenix-orch/disaster-recovery:latest
+          ports:
+            - containerPort: 9000
+              name: metrics
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          env:
+            - name: CONFIG_PATH
+              value: "/etc/disaster-recovery/config.yaml"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: access-key
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: secret-key
+            - name: AWS_REGION
+              value: "us-west-2"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/disaster-recovery
+              readOnly: true
+            - name: backup-storage
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: disaster-recovery-config
+        - name: backup-storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: disaster-recovery
+  namespace: phoenix-orch
+spec:
+  selector:
+    app: disaster-recovery
+  ports:
+    - port: 80
+      targetPort: 9000
+  type: ClusterIP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: disaster-recovery
+  namespace: phoenix-orch
+  labels:
+    prometheus: k8s
+spec:
+  selector:
+    matchLabels:
+      app: disaster-recovery
+  endpoints:
+    - port: metrics
+      interval: 15s

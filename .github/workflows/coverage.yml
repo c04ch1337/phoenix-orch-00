@@ -1,0 +1,81 @@
+name: Test Coverage
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  frontend-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+      
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      
+      - name: Run tests with coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          directory: ./frontend/coverage
+          flags: frontend
+          name: frontend-coverage
+
+  backend-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      
+      - name: Generate coverage report
+        run: |
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: lcov.info
+          flags: rust
+          name: rust-coverage
+
+  coverage-check:
+    needs: [frontend-coverage, backend-coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check coverage thresholds
+        run: |
+          FRONTEND_COVERAGE=$(curl -s "https://codecov.io/api/gh/${{ github.repository }}/branch/main/flags/frontend" | jq -r '.coverage')
+          BACKEND_COVERAGE=$(curl -s "https://codecov.io/api/gh/${{ github.repository }}/branch/main/flags/rust" | jq -r '.coverage')
+          
+          if (( $(echo "$FRONTEND_COVERAGE < 80" | bc -l) )); then
+            echo "Frontend coverage ($FRONTEND_COVERAGE%) is below 80% threshold"
+            exit 1
+          fi
+          
+          if (( $(echo "$BACKEND_COVERAGE < 80" | bc -l) )); then
+            echo "Backend coverage ($BACKEND_COVERAGE%) is below 80% threshold"
+            exit 1
+          fi
+          
+          echo "Coverage thresholds met!"

@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Cargo test
+        run: cargo test --workspace
+
+      - name: Frontend tests
+        if: ${{ hashFiles('frontend/package.json') != '' }}
+        run: |
+          cd frontend
+          npm install
+          npm test
+
+  release:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep '^version' core/master_orchestrator/Cargo.toml | head -n1 | cut -d'"' -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        run: |
+          git tag "v${{ steps.version.outputs.version }}" || echo "Tag already exists"
+          git push origin "v${{ steps.version.outputs.version }}" || echo "Tag push failed or tag already present"
+
+      - name: Build Docker image
+        run: |
+          docker build -t phoenix-orch:${{ steps.version.outputs.version }} .
+
+      # - name: Push Docker image
+      #   run: |
+      #     docker tag phoenix-orch:${{ steps.version.outputs.version }} your-registry/phoenix-orch:${{ steps.version.outputs.version }}
+      #     docker push your-registry/phoenix-orch:${{ steps.version.outputs.version }}

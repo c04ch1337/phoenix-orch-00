@@ -1,0 +1,36 @@
+[llm]
+default_provider = "openrouter"
+
+[llm.openrouter]
+api_key = "{{OPENROUTER_API_KEY}}"
+base_url = "https://openrouter.ai/api/v1"
+model_name = "anthropic/claude-3.5-sonnet"
+
+[llm.openai]
+api_key = "{{OPENAI_API_KEY}}"
+model_name = "gpt-4o"
+# Note: base_url left to provider default in this environment
+
+[agents.default]
+timeout_secs = 30
+
+[agents.default.retry]
+max_attempts = 3
+initial_backoff_ms = 500
+max_backoff_ms = 5000
+
+[agents.default.circuit_breaker]
+failure_threshold = 3
+cooldown_ms = 60000
+
+[agents.llm_router_agent]
+timeout_secs = 20
+
+[agents.llm_router_agent.retry]
+max_attempts = 5
+initial_backoff_ms = 250
+max_backoff_ms = 8000
+
+[agents.llm_router_agent.circuit_breaker]
+failure_threshold = 5
+cooldown_ms = 30000

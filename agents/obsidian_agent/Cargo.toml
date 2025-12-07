@@ -8,3 +8,5 @@ uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 shared_types = { path = "../../core/shared_types" }
+platform = { path = "../../core/platform" }
+tracing = { workspace = true }

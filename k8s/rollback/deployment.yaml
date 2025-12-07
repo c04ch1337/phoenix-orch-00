@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rollback-controller
+  namespace: phoenix-orch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rollback-controller
+  namespace: phoenix-orch
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rollback-controller
+  namespace: phoenix-orch
+subjects:
+  - kind: ServiceAccount
+    name: rollback-controller
+    namespace: phoenix-orch
+roleRef:
+  kind: Role
+  name: rollback-controller
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rollback-controller-config
+  namespace: phoenix-orch
+data:
+  config.yaml: |
+    monitored_deployments:
+      - name: master-orchestrator
+        namespace: phoenix-orch
+        thresholds:
+          error_rate: 0.05
+          latency_p95_seconds: 1.0
+          cpu_usage_percent: 85.0
+          memory_usage_percent: 85.0
+      - name: master-orchestrator-canary
+        namespace: phoenix-orch
+        thresholds:
+          error_rate: 0.02
+          latency_p95_seconds: 0.8
+          cpu_usage_percent: 80.0
+          memory_usage_percent: 80.0
+    
+    check_interval_seconds: 30
+    metrics_window_minutes: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rollback-controller
+  namespace: phoenix-orch
+  labels:
+    app: rollback-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rollback-controller
+  template:
+    metadata:
+      labels:
+        app: rollback-controller
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+    spec:
+      serviceAccountName: rollback-controller
+      containers:
+        - name: rollback-controller
+          image: phoenix-orch/rollback-controller:latest
+          ports:
+            - containerPort: 9000
+              name: metrics
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          env:
+            - name: PROMETHEUS_URL
+              value: "http://prometheus-operated:9090"
+            - name: CONFIG_PATH
+              value: "/etc/rollback-controller/config.yaml"
+            - name: ALERT_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: alert-webhooks
+                  key: slack-url
+          volumeMounts:
+            - name: config
+              mountPath: /etc/rollback-controller
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: rollback-controller-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rollback-controller
+  namespace: phoenix-orch
+spec:
+  selector:
+    app: rollback-controller
+  ports:
+    - port: 80
+      targetPort: 9000
+  type: ClusterIP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rollback-controller
+  namespace: phoenix-orch
+  labels:
+    prometheus: k8s
+spec:
+  selector:
+    matchLabels:
+      app: rollback-controller
+  endpoints:
+    - port: metrics
+      interval: 15s

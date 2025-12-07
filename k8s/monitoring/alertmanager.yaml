@@ -1,0 +1,179 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  name: alertmanager
+  namespace: phoenix-orch
+spec:
+  replicas: 2
+  configSecret: alertmanager-config
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-config
+  namespace: phoenix-orch
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: '${SLACK_WEBHOOK_URL}'
+      pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+    templates:
+      - '/etc/alertmanager/templates/*.tmpl'
+
+    route:
+      receiver: 'default'
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+
+      routes:
+        - match:
+            severity: critical
+          receiver: pagerduty-critical
+          group_wait: 0s
+          repeat_interval: 30m
+          continue: true
+
+        - match:
+            severity: warning
+          receiver: slack-warnings
+          group_wait: 30s
+          repeat_interval: 2h
+          continue: true
+
+        - match:
+            team: platform
+          receiver: platform-team
+          continue: true
+
+        - match:
+            team: backend
+          receiver: backend-team
+          continue: true
+
+    inhibit_rules:
+      - source_match:
+          severity: critical
+        target_match:
+          severity: warning
+        equal: ['alertname', 'cluster', 'service']
+
+    receivers:
+      - name: 'default'
+        slack_configs:
+          - channel: '#alerts'
+            send_resolved: true
+            title: '{{ template "slack.default.title" . }}'
+            text: '{{ template "slack.default.text" . }}'
+            footer: '{{ template "slack.default.footer" . }}'
+
+      - name: 'pagerduty-critical'
+        pagerduty_configs:
+          - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+            severity: '{{ if eq .GroupLabels.severity "critical" }}critical{{ else }}error{{ end }}'
+            description: '{{ template "pagerduty.default.description" . }}'
+            client: 'alertmanager'
+            client_url: '{{ template "pagerduty.default.clientURL" . }}'
+            details:
+              firing: '{{ template "pagerduty.default.instances" .Alerts.Firing }}'
+              resolved: '{{ template "pagerduty.default.instances" .Alerts.Resolved }}'
+              num_firing: '{{ .Alerts.Firing | len }}'
+              num_resolved: '{{ .Alerts.Resolved | len }}'
+
+      - name: 'slack-warnings'
+        slack_configs:
+          - channel: '#alerts-warnings'
+            send_resolved: true
+            title: '{{ template "slack.default.title" . }}'
+            text: '{{ template "slack.default.text" . }}'
+            footer: '{{ template "slack.default.footer" . }}'
+
+      - name: 'platform-team'
+        slack_configs:
+          - channel: '#platform-alerts'
+            send_resolved: true
+            title: '{{ template "slack.default.title" . }}'
+            text: '{{ template "slack.default.text" . }}'
+            footer: '{{ template "slack.default.footer" . }}'
+        pagerduty_configs:
+          - routing_key: '${PAGERDUTY_PLATFORM_KEY}'
+            severity: '{{ if eq .GroupLabels.severity "critical" }}critical{{ else }}error{{ end }}'
+            description: '{{ template "pagerduty.default.description" . }}'
+
+      - name: 'backend-team'
+        slack_configs:
+          - channel: '#backend-alerts'
+            send_resolved: true
+            title: '{{ template "slack.default.title" . }}'
+            text: '{{ template "slack.default.text" . }}'
+            footer: '{{ template "slack.default.footer" . }}'
+        pagerduty_configs:
+          - routing_key: '${PAGERDUTY_BACKEND_KEY}'
+            severity: '{{ if eq .GroupLabels.severity "critical" }}critical{{ else }}error{{ end }}'
+            description: '{{ template "pagerduty.default.description" . }}'
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-templates
+  namespace: phoenix-orch
+data:
+  default.tmpl: |
+    {{ define "slack.default.title" }}
+    [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}
+    {{ end }}
+
+    {{ define "slack.default.text" }}
+    {{ range .Alerts }}
+    *Alert:* {{ .Labels.alertname }}
+    *Description:* {{ .Annotations.description }}
+    *Severity:* {{ .Labels.severity }}
+    *Service:* {{ .Labels.service }}
+    *Started:* {{ .StartsAt | since }}
+    {{ if .Annotations.runbook }}*Runbook:* {{ .Annotations.runbook }}{{ end }}
+    {{ end }}
+    {{ end }}
+
+    {{ define "slack.default.footer" }}
+    {{ if gt (len .Alerts.Firing) 0 }}
+    {{ .Alerts.Firing | len }} alert(s) firing
+    {{ end }}
+    {{ if gt (len .Alerts.Resolved) 0 }}
+    {{ .Alerts.Resolved | len }} alert(s) resolved
+    {{ end }}
+    {{ end }}
+
+    {{ define "pagerduty.default.description" }}
+    [{{ .Status | toUpper }}:{{ .Alerts.Firing | len }}] {{ .CommonLabels.alertname }}
+    {{ end }}
+
+    {{ define "pagerduty.default.instances" }}
+    {{ range . }}
+    Alert: {{ .Labels.alertname }}
+    Description: {{ .Annotations.description }}
+    Severity: {{ .Labels.severity }}
+    Service: {{ .Labels.service }}
+    Started: {{ .StartsAt | since }}
+    {{ if .Annotations.runbook }}Runbook: {{ .Annotations.runbook }}{{ end }}
+    {{ end }}
+    {{ end }}
+
+    {{ define "pagerduty.default.clientURL" }}
+    {{ if .CommonAnnotations.dashboard }}{{ .CommonAnnotations.dashboard }}{{ else }}{{ .ExternalURL }}{{ end }}
+    {{ end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: phoenix-orch
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - port: 9093
+      targetPort: 9093
+  type: ClusterIP

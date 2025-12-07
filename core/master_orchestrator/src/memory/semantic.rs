@@ -49,7 +49,7 @@ impl SemanticMemory {
     pub fn init(path: &str) -> Result<Self, SemanticError> {
         // Open Sled database
         let db = sled::open(path)?;
-        
+
         // Open trees (like column families)
         let texts = db.open_tree(TREE_TEXTS)?;
         let vectors = db.open_tree(TREE_VECTORS)?;
@@ -62,12 +62,17 @@ impl SemanticMemory {
     }
 
     /// Store a context with its text and embedding.
-    /// 
+    ///
     /// # Arguments
     /// * `id` - Unique identifier for this context
     /// * `text` - Full text content to store
     /// * `embedding` - Pre-computed embedding vector (128 dimensions)
-    pub fn store_context(&self, id: &Uuid, text: &str, embedding: &[f32]) -> Result<(), SemanticError> {
+    pub fn store_context(
+        &self,
+        id: &Uuid,
+        text: &str,
+        embedding: &[f32],
+    ) -> Result<(), SemanticError> {
         let key = id.to_string();
 
         // Store text in texts tree
@@ -92,17 +97,19 @@ impl SemanticMemory {
         let key = id.to_string();
 
         match self.texts.get(key.as_bytes())? {
-            Some(data) => {
-                String::from_utf8(data.to_vec())
-                    .map_err(|e| SemanticError(format!("UTF-8 decode error: {}", e)))
-            }
+            Some(data) => String::from_utf8(data.to_vec())
+                .map_err(|e| SemanticError(format!("UTF-8 decode error: {}", e))),
             None => Err(SemanticError(format!("Context not found: {}", id))),
         }
     }
 
     /// Search for similar contexts using cosine similarity.
     /// Returns top-k results as (UUID, text) pairs.
-    pub fn search_similar(&self, query_embedding: &[f32], k: usize) -> Result<Vec<(Uuid, String)>, SemanticError> {
+    pub fn search_similar(
+        &self,
+        query_embedding: &[f32],
+        k: usize,
+    ) -> Result<Vec<(Uuid, String)>, SemanticError> {
         let mut scores: Vec<(String, f32)> = Vec::new();
 
         // Linear scan of all vectors (matching original implementation)
@@ -205,13 +212,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&path);
 
         let mem = SemanticMemory::init(&path).expect("Failed to init");
-        
+
         let id = Uuid::new_v4();
         let text = "Test semantic memory content";
         let embedding = generate_simple_embedding(text);
 
-        mem.store_context(&id, text, &embedding).expect("Failed to store");
-        
+        mem.store_context(&id, text, &embedding)
+            .expect("Failed to store");
+
         let retrieved = mem.retrieve_context(&id).expect("Failed to retrieve");
         assert_eq!(retrieved, text);
 
@@ -233,16 +241,19 @@ mod tests {
             let id = Uuid::new_v4();
             let text = format!("Document number {} about cats and dogs", i);
             let embedding = generate_simple_embedding(&text);
-            mem.store_context(&id, &text, &embedding).expect("Failed to store");
+            mem.store_context(&id, &text, &embedding)
+                .expect("Failed to store");
         }
 
         // Search
         let query = "cats and dogs";
         let query_embedding = generate_simple_embedding(query);
-        let results = mem.search_similar(&query_embedding, 3).expect("Failed to search");
+        let results = mem
+            .search_similar(&query_embedding, 3)
+            .expect("Failed to search");
 
         assert_eq!(results.len(), 3);
-        
+
         // Clean up
         drop(mem);
         let _ = std::fs::remove_dir_all(&path);

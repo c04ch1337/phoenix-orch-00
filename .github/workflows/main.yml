@@ -1,0 +1,135 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+      
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      
+      - name: Run unit tests with coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      
+      - name: Run E2E tests
+        working-directory: frontend
+        run: npm run test:e2e
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          directory: ./frontend/coverage
+          flags: frontend
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Run unit tests with coverage
+        run: |
+          cargo install cargo-llvm-cov
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+      
+      - name: Run performance benchmarks
+        run: |
+          cd core/master_orchestrator
+          cargo bench
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: lcov.info
+          flags: rust
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run security audit
+        uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Run cargo deny checks
+        run: |
+          cargo install cargo-deny
+          cargo deny check
+
+  quality-gates:
+    needs: [frontend-tests, backend-tests, security-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.frontend-tests.result }}" != "success" ] || \
+             [ "${{ needs.backend-tests.result }}" != "success" ] || \
+             [ "${{ needs.security-scan.result }}" != "success" ]; then
+            echo "One or more test suites failed"
+            exit 1
+          fi
+      
+      - name: Check coverage thresholds
+        run: |
+          FRONTEND_COVERAGE=$(curl -s "https://codecov.io/api/gh/${{ github.repository }}/branch/main/flags/frontend" | jq -r '.coverage')
+          BACKEND_COVERAGE=$(curl -s "https://codecov.io/api/gh/${{ github.repository }}/branch/main/flags/rust" | jq -r '.coverage')
+          
+          if (( $(echo "$FRONTEND_COVERAGE < 80" | bc -l) )); then
+            echo "Frontend coverage ($FRONTEND_COVERAGE%) is below 80% threshold"
+            exit 1
+          fi
+          
+          if (( $(echo "$BACKEND_COVERAGE < 80" | bc -l) )); then
+            echo "Backend coverage ($BACKEND_COVERAGE%) is below 80% threshold"
+            exit 1
+          fi
+
+  deploy:
+    needs: [quality-gates]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      
+      - name: Build backend
+        run: cargo build --release
+      
+      - name: Deploy
+        run: |
+          echo "Add deployment steps here"
+        # Add actual deployment steps based on your infrastructure

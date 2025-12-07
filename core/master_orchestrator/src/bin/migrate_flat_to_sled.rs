@@ -52,7 +52,10 @@ fn main() {
     let vector_dir = Path::new(FLAT_VECTOR_DIR);
 
     if !text_dir.exists() {
-        eprintln!("Error: Source text directory does not exist: {}", FLAT_TEXT_DIR);
+        eprintln!(
+            "Error: Source text directory does not exist: {}",
+            FLAT_TEXT_DIR
+        );
         return;
     }
 
@@ -132,7 +135,7 @@ fn main() {
                     }
                     vec
                 }
-                Err(_) => generate_simple_embedding(&text_content)
+                Err(_) => generate_simple_embedding(&text_content),
             }
         } else {
             generate_simple_embedding(&text_content)

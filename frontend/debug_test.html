@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Test - Input Focus</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #050505;
+            color: white;
+        }
+
+        .test-input {
+            background-color: #0a0a0a;
+            border: 1px solid #333333;
+            border-radius: 0.25rem;
+            padding: 1rem;
+            color: white;
+            font-size: 1.1rem;
+            resize: none;
+            height: 60px;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .test-input:focus {
+            outline: none;
+            border-color: #E63946;
+            box-shadow: 0 0 0 1px rgba(230, 57, 70, 0.3);
+        }
+
+        .test-input:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            background-color: #0a0a0a;
+            pointer-events: none;
+        }
+
+        .debug-info {
+            background-color: #222;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Debug Test - Input Focus Issues</h1>
+
+    <div class="debug-info">
+        <h3>Test 1: Basic textarea</h3>
+        <textarea class="test-input" placeholder="This should work normally..."></textarea>
+    </div>
+
+    <div class="debug-info">
+        <h3>Test 2: Disabled textarea</h3>
+        <textarea class="test-input" disabled placeholder="This is disabled..."></textarea>
+    </div>
+
+    <div class="debug-info">
+        <h3>Test 3: Textarea with pointer-events: none</h3>
+        <textarea class="test-input" style="pointer-events: none;"
+            placeholder="This has pointer-events: none..."></textarea>
+    </div>
+
+    <div class="debug-info">
+        <h3>Test 4: Textarea with inert parent</h3>
+        <div inert>
+            <textarea class="test-input" placeholder="This is inside an inert parent..."></textarea>
+        </div>
+    </div>
+
+    <div class="debug-info">
+        <h3>Test 5: Textarea with overlay</h3>
+        <div style="position: relative;">
+            <textarea class="test-input" placeholder="This has an overlay..."></textarea>
+            <div
+                style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,0,0,0.1); pointer-events: auto;">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.querySelectorAll('textarea').forEach((textarea, index) => {
+            textarea.addEventListener('focus', function () {
+                console.log(`Test ${index + 1} textarea focused`);
+            });
+
+            textarea.addEventListener('blur', function () {
+                console.log(`Test ${index + 1} textarea blurred`);
+            });
+
+            textarea.addEventListener('click', function () {
+                console.log(`Test ${index + 1} textarea clicked, disabled:`, this.disabled);
+            });
+        });
+
+        document.addEventListener('click', function (e) {
+            console.log('Global click on:', e.target.tagName, e.target.className);
+        }, true);
+    </script>
+</body>
+
+</html>

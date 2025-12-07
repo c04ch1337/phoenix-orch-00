@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-validator
+  namespace: phoenix-orch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: health-validator
+  template:
+    metadata:
+      labels:
+        app: health-validator
+    spec:
+      containers:
+        - name: health-validator
+          image: phoenix-orch/health-validator:latest
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9000
+              name: metrics
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          env:
+            - name: PROMETHEUS_URL
+              value: "http://prometheus-operated:9090"
+            - name: ALERT_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: alert-webhooks
+                  key: slack-url
+          volumeMounts:
+            - name: config
+              mountPath: /etc/health-validator
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: health-validator-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: health-validator-config
+  namespace: phoenix-orch
+data:
+  config.yaml: |
+    validation:
+      error_rate:
+        query: |
+          sum(rate(http_requests_total{status=~"5..",version="canary"}[5m])) 
+          / 
+          sum(rate(http_requests_total{version="canary"}[5m]))
+        thresholds:
+          warning: 0.005
+          critical: 0.01
+        
+      latency:
+        query: |
+          histogram_quantile(0.95, 
+            sum(rate(request_duration_seconds_bucket{version="canary"}[5m])) 
+            by (le))
+        thresholds:
+          warning: 0.2
+          critical: 0.5
+        
+      memory_usage:
+        query: |
+          container_memory_usage_bytes{container="master-orchestrator",version="canary"}
+          /
+          container_spec_memory_limit_bytes{container="master-orchestrator",version="canary"}
+        thresholds:
+          warning: 0.85
+          critical: 0.95
+        
+      cpu_usage:
+        query: |
+          rate(container_cpu_usage_seconds_total{container="master-orchestrator",version="canary"}[5m])
+          /
+          container_spec_cpu_quota{container="master-orchestrator",version="canary"}
+        thresholds:
+          warning: 0.85
+          critical: 0.95
+
+    actions:
+      on_warning:
+        - type: alert
+          channel: slack
+          message: "Canary deployment showing degraded performance"
+        
+      on_critical:
+        - type: alert
+          channel: slack
+          message: "Critical issues detected in canary deployment"
+        - type: rollback
+          target: deployment/master-orchestrator-canary
+        
+      on_success:
+        - type: alert
+          channel: slack
+          message: "Canary deployment validation successful"
+        - type: promote
+          source: deployment/master-orchestrator-canary
+          target: deployment/master-orchestrator
+
+    intervals:
+      check_interval: 15s
+      validation_window: 5m
+      promotion_delay: 15m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-validator
+  namespace: phoenix-orch
+spec:
+  selector:
+    app: health-validator
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: health-validator
+  namespace: phoenix-orch
+spec:
+  selector:
+    matchLabels:
+      app: health-validator
+  endpoints:
+    - port: metrics
+      interval: 15s

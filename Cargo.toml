@@ -3,9 +3,11 @@ resolver = "2"
 members = [
     "core/master_orchestrator",
     "core/shared_types",
+    "core/platform",
     "agents/git_agent",
     "agents/obsidian_agent",
     "agents/llm_router_agent",
+    "tools/load_tester",
 ]
 
 [workspace.dependencies]
@@ -14,3 +16,17 @@ serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 tokio = { version = "1.0", features = ["full"] }
 rusqlite = { version = "0.30", features = ["bundled"] }
+num-traits = "0.2.18"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+metrics = "0.22"
+metrics-exporter-prometheus = "0.13"
+thiserror = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false

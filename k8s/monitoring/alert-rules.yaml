@@ -1,0 +1,209 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: phoenix-orch-alerts
+  namespace: phoenix-orch
+  labels:
+    prometheus: k8s
+    role: alert-rules
+spec:
+  groups:
+    - name: system_alerts
+      rules:
+        - alert: HighCPUUsage
+          expr: job:cpu_usage:percent > 85
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: High CPU usage detected
+            description: "CPU usage is above 85% for 5 minutes"
+            runbook: "docs/runbooks/high_cpu_usage.md"
+
+        - alert: CriticalCPUUsage
+          expr: job:cpu_usage:percent > 95
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: Critical CPU usage detected
+            description: "CPU usage is above 95% for 5 minutes"
+            runbook: "docs/runbooks/critical_cpu_usage.md"
+
+        - alert: HighMemoryUsage
+          expr: job:memory_usage:percent > 85
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: High memory usage detected
+            description: "Memory usage is above 85% for 5 minutes"
+            runbook: "docs/runbooks/high_memory_usage.md"
+
+        - alert: CriticalMemoryUsage
+          expr: job:memory_usage:percent > 95
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: Critical memory usage detected
+            description: "Memory usage is above 95% for 5 minutes"
+            runbook: "docs/runbooks/critical_memory_usage.md"
+
+    - name: application_alerts
+      rules:
+        - alert: HighErrorRate
+          expr: job:error_rate:5m > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: High error rate detected
+            description: "Error rate is above 5% for 5 minutes"
+            runbook: "docs/runbooks/high_error_rate.md"
+
+        - alert: CriticalErrorRate
+          expr: job:error_rate:5m > 0.10
+          for: 5m
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: Critical error rate detected
+            description: "Error rate is above 10% for 5 minutes"
+            runbook: "docs/runbooks/critical_error_rate.md"
+
+        - alert: HighLatency
+          expr: job:request_duration_seconds:p95 > 1
+          for: 5m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: High latency detected
+            description: "95th percentile latency is above 1s for 5 minutes"
+            runbook: "docs/runbooks/high_latency.md"
+
+        - alert: CriticalLatency
+          expr: job:request_duration_seconds:p95 > 2
+          for: 5m
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: Critical latency detected
+            description: "95th percentile latency is above 2s for 5 minutes"
+            runbook: "docs/runbooks/critical_latency.md"
+
+    - name: canary_alerts
+      rules:
+        - alert: CanaryHighErrorRate
+          expr: |
+            (
+              job:error_rate:5m{version="canary"} > 0.02
+            )
+          for: 2m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: High error rate in canary deployment
+            description: "Canary error rate is above 2% for 2 minutes"
+            runbook: "docs/runbooks/canary_high_error_rate.md"
+
+        - alert: CanaryCriticalErrorRate
+          expr: |
+            (
+              job:error_rate:5m{version="canary"} > 0.05
+            )
+          for: 2m
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: Critical error rate in canary deployment
+            description: "Canary error rate is above 5% for 2 minutes"
+            runbook: "docs/runbooks/canary_critical_error_rate.md"
+
+        - alert: CanaryHighLatency
+          expr: |
+            (
+              job:request_duration_seconds:p95{version="canary"} > 
+              1.2 * job:request_duration_seconds:p95{version="stable"}
+            )
+          for: 2m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: High latency in canary deployment
+            description: "Canary latency is 20% higher than stable for 2 minutes"
+            runbook: "docs/runbooks/canary_high_latency.md"
+
+    - name: agent_alerts
+      rules:
+        - alert: AgentUnhealthy
+          expr: agent_health_score < 0.8
+          for: 5m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: Agent health degraded
+            description: "Agent health score is below 80% for 5 minutes"
+            runbook: "docs/runbooks/agent_unhealthy.md"
+
+        - alert: AgentCriticalHealth
+          expr: agent_health_score < 0.6
+          for: 5m
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: Agent health critical
+            description: "Agent health score is below 60% for 5 minutes"
+            runbook: "docs/runbooks/agent_critical_health.md"
+
+        - alert: AgentHighFailureRate
+          expr: rate(agent_call_failures_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: High agent failure rate
+            description: "Agent failure rate is above 10% for 5 minutes"
+            runbook: "docs/runbooks/agent_high_failure_rate.md"
+
+    - name: infrastructure_alerts
+      rules:
+        - alert: PodRestartingFrequently
+          expr: rate(kube_pod_container_status_restarts_total{namespace="phoenix-orch"}[1h]) > 0.2
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: Pod restarting frequently
+            description: "Pod {{ $labels.pod }} is restarting frequently"
+            runbook: "docs/runbooks/pod_restarts.md"
+
+        - alert: PersistentVolumeFilling
+          expr: |
+            kubelet_volume_stats_available_bytes{namespace="phoenix-orch"}
+            /
+            kubelet_volume_stats_capacity_bytes{namespace="phoenix-orch"}
+            < 0.2
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: Persistent volume filling up
+            description: "PV {{ $labels.persistentvolumeclaim }} is more than 80% full"
+            runbook: "docs/runbooks/pv_filling.md"

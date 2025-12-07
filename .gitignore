@@ -2,9 +2,22 @@
 *.o
 /data/*.db
 /data/*.bin
-.env
 
-# Ignore runtime-generated database files
+# Environment files (except the checked-in example)
+.env
+.env.*
+!.env.example
+
+# Ignore runtime-generated database and memory files
 /data/rocksdb/
+/data/memory/
+/data/sled/
+
 /data/memory/text/
 /data/memory/vectors/
+
+# Local config overrides
+/data/config.*.local.toml
+
+# Log files
+*.log

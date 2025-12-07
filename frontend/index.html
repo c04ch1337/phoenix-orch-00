@@ -4,45 +4,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; connect-src 'self' http://127.0.0.1:8181 http://localhost:8181; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; img-src 'self' data: https://grainy-gradients.vercel.app;">
     <title>Phoenix Orch</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Code&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap"
         rel="stylesheet">
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="style.css?v=3">
 </head>
 
 <body>
     <!-- Splash Screen -->
-    <div id="splash-screen">
+    <div id="splash-screen" role="dialog" aria-modal="true" aria-labelledby="splash-title"
+        aria-describedby="splash-subtitle">
         <div class="noise-overlay"></div>
         <div class="ambient-glow"></div>
 
         <div class="splash-content">
             <img src="flame.svg" alt="Phoenix Flame" class="splash-icon">
-            <h1 class="splash-title">PHOENIX <span class="text-accent">ORCH</span></h1>
-            <p class="splash-subtitle">THE ASHEN GUARD EDITION</p>
+            <h1 id="splash-title" class="splash-title">PHOENIX <span class="text-accent">ORCH</span></h1>
+            <p id="splash-subtitle" class="splash-subtitle">THE ASHEN GUARD EDITION</p>
 
-            <button id="ignite-btn">
+            <button id="ignite-btn" type="button">
                 <span class="btn-text">IGNITE SYSTEM</span>
-                <div class="btn-fill"></div>
-                <div class="btn-underline"></div>
+                <div class="btn-fill" aria-hidden="true"></div>
+                <div class="btn-underline" aria-hidden="true"></div>
             </button>
         </div>
     </div>
 
     <!-- Main App (Hidden initially) -->
-    <div id="app-container" class="hidden">
+    <div id="app-container" class="hidden" inert>
         <header>
             <h1>
-                <div class="status-dot"></div>
-                PHOENIX <span class="text-accent">ORCH</span>
+                <div class="status-dot state-idle" aria-hidden="true"></div>
+                <span>PHOENIX <span class="text-accent">ORCH</span></span>
             </h1>
         </header>
 
-        <div id="chat-container">
+        <div id="chat-container" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation log">
             <!-- Messages will appear here -->
             <div class="message agent">
                 <span class="role">System</span>
@@ -51,8 +54,10 @@
         </div>
 
         <div id="input-area">
-            <textarea id="message-input" placeholder="Type a command or message..."></textarea>
-            <button id="send-btn">Send</button>
+            <label class="visually-hidden" for="message-input">Type a command or message to send to the
+                orchestrator</label>
+            <textarea id="message-input" placeholder="Type a command or message..." rows="2"></textarea>
+            <button id="send-btn" type="button" aria-label="Send message">Send</button>
         </div>
     </div> <!-- End App Container -->
 

@@ -1,0 +1,93 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus
+  namespace: phoenix-orch
+spec:
+  replicas: 2
+  serviceAccountName: prometheus
+  serviceMonitorSelector:
+    matchLabels:
+      team: phoenix-orch
+  resources:
+    requests:
+      memory: 400Mi
+      cpu: 500m
+    limits:
+      memory: 800Mi
+      cpu: 1000m
+  storage:
+    volumeClaimTemplate:
+      spec:
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 100Gi
+  retention: 15d
+  additionalScrapeConfigs:
+    name: additional-scrape-configs
+    key: prometheus-additional.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: additional-scrape-configs
+  namespace: phoenix-orch
+data:
+  prometheus-additional.yaml: |
+    - job_name: 'master-orchestrator'
+      scrape_interval: 15s
+      static_configs:
+        - targets: ['master-orchestrator:9000']
+      metric_relabel_configs:
+        - source_labels: [__name__]
+          regex: 'go_.*'
+          action: drop
+
+    - job_name: 'health-validator'
+      scrape_interval: 15s
+      static_configs:
+        - targets: ['health-validator:9000']
+
+    - job_name: 'redis'
+      static_configs:
+        - targets: ['redis-exporter:9121']
+      metrics_path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: master-orchestrator
+  namespace: phoenix-orch
+  labels:
+    team: phoenix-orch
+spec:
+  selector:
+    matchLabels:
+      app: master-orchestrator
+  endpoints:
+  - port: metrics
+    interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: phoenix-orch-rules
+  namespace: phoenix-orch
+  labels:
+    team: phoenix-orch
+spec:
+  groups:
+  - name: phoenix-orch
+    rules:
+    - record: job:request_duration_seconds:p95
+      expr: histogram_quantile(0.95, sum(rate(request_duration_seconds_bucket[5m])) by (le, job))
+    
+    - record: job:error_rate:5m
+      expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (job) / sum(rate(http_requests_total[5m])) by (job)
+    
+    - record: job:memory_usage:percent
+      expr: sum(container_memory_usage_bytes) by (job) / sum(container_spec_memory_limit_bytes) by (job) * 100
+    
+    - record: job:cpu_usage:percent
+      expr: sum(rate(container_cpu_usage_seconds_total[5m])) by (job) / sum(container_spec_cpu_quota) by (job) * 100

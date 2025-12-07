@@ -1,10 +1,20 @@
+use once_cell::sync::Lazy;
+use reqwest::Client;
+use serde_json::json;
 use shared_types::{ActionRequest, ActionResponse, ActionResult};
 use std::io::{self, Read};
-use serde_json::json;
-use reqwest::Client;
+use std::time::Duration;
+
+static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("failed to build HTTP client")
+});
 
 #[tokio::main]
 async fn main() {
+    platform::init_tracing("llm_router_agent").expect("failed to init tracing");
     // 1. Read JSON ActionRequest from STDIN
     let mut buffer = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut buffer) {
@@ -27,8 +37,14 @@ async fn main() {
 
     let result = if let Some(config) = config {
         let api_key = config.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
-        let base_url = config.get("base_url").and_then(|v| v.as_str()).unwrap_or("https://openrouter.ai/api/v1");
-        let model_name = config.get("model_name").and_then(|v| v.as_str()).unwrap_or("google/gemini-2.0-flash-exp:free");
+        let base_url = config
+            .get("base_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("https://openrouter.ai/api/v1");
+        let model_name = config
+            .get("model_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("google/gemini-2.0-flash-exp:free");
 
         match call_llm_provider(base_url, api_key, model_name, prompt).await {
             Ok(response_text) => ActionResult {
@@ -56,10 +72,14 @@ async fn main() {
     // 3. Generate and write JSON ActionResponse to STDOUT
     let response = ActionResponse {
         request_id: request.request_id,
+        api_version: None,
         status: "success".to_string(),
         code: 0,
         result: Some(result),
         error: None,
+        plan_id: request.plan_id,
+        task_id: request.task_id,
+        correlation_id: request.correlation_id,
     };
 
     let response_json = match serde_json::to_string(&response) {
@@ -73,22 +93,30 @@ async fn main() {
     print!("{}", response_json);
 }
 
-async fn call_llm_provider(base_url: &str, api_key: &str, model: &str, prompt: &str) -> Result<String, String> {
-    let client = Client::new();
+async fn call_llm_provider(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+) -> Result<String, String> {
+    // Use a shared HTTP client with a sane timeout
+    let client: &Client = &*HTTP_CLIENT;
+
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
     let body = json!({
         "model": model,
         "messages": [
-            {"role": "user", "content": prompt}
+            { "role": "user", "content": prompt }
         ]
     });
 
-    let res = client.post(&url)
+    let res = client
+        .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
-        // OpenRouter specific header
-        .header("HTTP-Referer", "http://localhost:8181") 
+        // OpenRouter specific headers (fine for production)
+        .header("HTTP-Referer", "http://localhost:8181")
         .header("X-Title", "Twin Orchestrator")
         .json(&body)
         .send()
@@ -101,12 +129,14 @@ async fn call_llm_provider(base_url: &str, api_key: &str, model: &str, prompt: &
         return Err(format!("API Error {}: {}", status, text));
     }
 
-    let json: serde_json::Value = res.json().await
+    let json: serde_json::Value = res
+        .json()
+        .await
         .map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
     let content = json["choices"][0]["message"]["content"]
         .as_str()
-        .ok_or("No content in response")?
+        .ok_or_else(|| "No content in response".to_string())?
         .to_string();
 
     Ok(content)

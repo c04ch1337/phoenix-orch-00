@@ -1,0 +1,46 @@
+[advisories]
+db-path = "~/.cargo/advisory-db"
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "warn"
+notice = "warn"
+
+[licenses]
+unlicensed = "deny"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+]
+copyleft = "warn"
+default = "deny"
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+highlight = "all"
+skip = [
+    # Dependencies that are allowed to have multiple versions
+    { name = "serde" },
+    { name = "serde_json" },
+]
+
+# Deny certain categories of dependencies
+deny = [
+    # Dependencies with security vulnerabilities
+    { name = "openssl", version = "<1.1.0" },
+    
+    # Dependencies that are unmaintained
+    { name = "tempdir" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = ["phoenixorch"]
