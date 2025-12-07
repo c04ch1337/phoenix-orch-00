@@ -1,0 +1,307 @@
+warning: unused import: `error`
+ --> core\platform\src\audit.rs:5:15
+  |
+5 | use tracing::{error, info};
+  |               ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `platform` (lib) generated 1 warning (run `cargo fix --lib -p platform` to apply 1 suggestion)
+warning: unused import: `AuditEventType`
+ --> core\master_orchestrator\src\api\audit_middleware.rs:6:36
+  |
+6 | ...tLogger, AuditEventType};
+  |             ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::net::IpAddr`
+ --> core\master_orchestrator\src\api\audit_middleware.rs:8:5
+  |
+8 | use std::net::IpAddr;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused imports: `SystemTime` and `UNIX_EPOCH`
+ --> core\master_orchestrator\src\api\auth.rs:3:17
+  |
+3 | ...me::{SystemTime, UNIX_EPOCH};
+  |         ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `BoxBody` and `HttpMessage`
+ --> core\master_orchestrator\src\api\validation.rs:3:31
+  |
+3 | ... Error, HttpResponse, HttpMessage,
+  |                          ^^^^^^^^^^^
+4 | ...::{BoxBody, MessageBody, EitherBody},
+  |       ^^^^^^^
+
+warning: unused import: `audit_middleware::SecurityAuditMiddleware`
+  --> core\master_orchestrator\src\api\mod.rs:15:5
+   |
+15 | use audit_middleware::SecurityAuditMiddleware;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `RateLimitMiddleware`
+  --> core\master_orchestrator\src\api\mod.rs:17:35
+   |
+17 | ...nfig, RateLimitMiddleware};
+   |          ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `validation::RequestValidationMiddleware`
+  --> core\master_orchestrator\src\api\mod.rs:18:5
+   |
+18 | use validation::RequestValidationMiddleware;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `tool_service`
+   --> core\master_orchestrator\src\planner.rs:283:5
+    |
+283 |     tool_service: Arc<ToolService>,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_tool_service`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `api_ctx` and `claims` are never read
+  --> core\master_orchestrator\src\api\ws.rs:19:5
+   |
+18 | struct WsSession {
+   |        --------- fields in this struct
+19 |     api_ctx: ApiContext,
+   |     ^^^^^^^
+20 |     claims: Option<Claims>,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `agent_in_circuit_cooldown` is never used
+  --> core\master_orchestrator\src\planner.rs:27:4
+   |
+27 | fn agent_in_circuit_cooldown(
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `master_orchestrator` (lib) generated 10 warnings (run `cargo fix --lib -p master_orchestrator` to apply 7 suggestions)
+warning: unused variable: `vector_dir`
+  --> core\master_orchestrator\src\bin\migrate_flat_to_sled.rs:52:9
+   |
+52 |     let vector_dir = Path::new(FLAT...
+   |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_vector_dir`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `shared_types::AppConfig`
+  --> core\master_orchestrator\src\main.rs:18:5
+   |
+18 | use shared_types::AppConfig;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `rate_limiter`
+  --> core\master_orchestrator\src\main.rs:52:9
+   |
+52 |     let rate_limiter = api::rate_li...
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_rate_limiter`
+
+warning: unused variable: `request_validator`
+  --> core\master_orchestrator\src\main.rs:53:9
+   |
+53 |     let request_validator = api::va...
+   |         ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_request_validator`
+
+warning: unused variable: `security_audit`
+  --> core\master_orchestrator\src\main.rs:54:9
+   |
+54 |     let security_audit = api::audit...
+   |         ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_security_audit`
+
+warning: field `encoding_key` is never read
+  --> core\master_orchestrator\src\api\auth.rs:16:5
+   |
+15 | pub struct JwtAuth {
+   |            ------- field in this struct
+16 |     encoding_key: EncodingKey,
+   |     ^^^^^^^^^^^^
+   |
+   = note: `JwtAuth` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `create_token` is never used
+  --> core\master_orchestrator\src\api\auth.rs:28:12
+   |
+20 | impl JwtAuth {
+   | ------------ method in this implementation
+...
+28 |     pub fn create_token(&self, user...
+   |            ^^^^^^^^^^^^
+
+warning: field `context` is never read
+  --> core\master_orchestrator\src\api\http.rs:17:9
+   |
+15 | pub struct ChatPayload {
+   |            ----------- field in this struct
+16 |     pub message: String,
+17 |     pub context: Option<String>,
+   |         ^^^^^^^
+   |
+   = note: `ChatPayload` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: function `configure_cors` is never used
+  --> core\master_orchestrator\src\api\http.rs:48:8
+   |
+48 | pub fn configure_cors(cfg: &mut web...
+   |        ^^^^^^^^^^^^^^
+
+warning: field `ws_schema` is never read
+  --> core\master_orchestrator\src\api\validation.rs:15:5
+   |
+13 | pub struct ValidationSchemas {
+   |            ----------------- field in this struct
+14 |     chat_schema: Arc<JSONSchema>,
+15 |     ws_schema: Arc<JSONSchema>,
+   |     ^^^^^^^^^
+
+warning: method `validate_ws` is never used
+  --> core\master_orchestrator\src\api\validation.rs:81:12
+   |
+18 | impl ValidationSchemas {
+   | ---------------------- method in this implementation
+...
+81 |     pub fn validate_ws(&self, value...
+   |            ^^^^^^^^^^^
+
+warning: fields `api_ctx` and `claims` are never read
+  --> core\master_orchestrator\src\api\ws.rs:19:5
+   |
+18 | struct WsSession {
+   |        --------- fields in this struct
+19 |     api_ctx: ApiContext,
+   |     ^^^^^^^
+20 |     claims: Option<Claims>,
+   |     ^^^^^^
+
+warning: function `load_config` is never used
+  --> core\master_orchestrator\src\config_service.rs:31:8
+   |
+31 | pub fn load_config(path: &str) -> R...
+   |        ^^^^^^^^^^^
+
+warning: function `stream_read_limited` is never used
+  --> core\master_orchestrator\src\memory\io.rs:12:14
+   |
+12 | pub async fn stream_read_limited(pa...
+   |              ^^^^^^^^^^^^^^^^^^^
+
+warning: function `stream_write_from_reader` is never used
+  --> core\master_orchestrator\src\memory\io.rs:50:14
+   |
+50 | ... fn stream_write_from_reader<R>(...
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `retrieve_context` is never used
+  --> core\master_orchestrator\src\memory\semantic.rs:96:12
+   |
+46 | impl SemanticMemory {
+   | ------------------- method in this implementation
+...
+96 |     pub fn retrieve_context(&self, ...
+   |            ^^^^^^^^^^^^^^^^
+
+warning: method `add_knowledge_triple` is never used
+   --> core\master_orchestrator\src\memory_service.rs:209:18
+    |
+ 29 | impl MemoryService {
+    | ------------------ method in this implementation
+...
+209 |     pub async fn add_knowledge_triple(
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `root_task_id` is never read
+  --> core\master_orchestrator\src\planner.rs:16:9
+   |
+14 | pub struct PlanAndExecuteOutputV1 {
+   |            ---------------------- field in this struct
+15 |     pub plan_id: PlanId,
+16 |     pub root_task_id: TaskId,
+   |         ^^^^^^^^^^^^
+
+warning: field `correlation_id` is never read
+  --> core\master_orchestrator\src\planner.rs:22:9
+   |
+21 | pub struct PlanAndExecuteErrorV1 {
+   |            --------------------- field in this struct
+22 |     pub correlation_id: CorrelationId,
+   |         ^^^^^^^^^^^^^^
+
+warning: function `register_tool` is never used
+  --> core\master_orchestrator\src\tool_registry_service.rs:22:8
+   |
+22 | pub fn register_tool(conn: &Connect...
+   |        ^^^^^^^^^^^^^
+
+warning: `master_orchestrator` (bin "migrate_flat_to_sled") generated 1 warning
+warning: `master_orchestrator` (bin "master_orchestrator") generated 28 warnings (9 duplicates) (run `cargo fix --bin "master_orchestrator"` to apply 1 suggestion)
+warning: unused import: `std::fs::File`
+   --> core\master_orchestrator\src\config_service.rs:187:9
+    |
+187 |     use std::fs::File;
+    |         ^^^^^^^^^^^^^
+
+warning: field `context` is never read
+  --> core\master_orchestrator\src\api\http.rs:17:9
+   |
+15 | pub struct ChatPayload {
+   |            ----------- field in this struct
+16 |     pub message: String,
+17 |     pub context: Option<String>,
+   |         ^^^^^^^
+   |
+   = note: `ChatPayload` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `master_orchestrator` (lib test) generated 10 warnings (9 duplicates) (run `cargo fix --lib -p master_orchestrator --tests` to apply 1 suggestion)
+warning: `master_orchestrator` (bin "master_orchestrator" test) generated 23 warnings (22 duplicates)
+warning: `master_orchestrator` (bin "migrate_flat_to_sled" test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.53s
+     Running unittests src\lib.rs (C:\Users\JAMEYMILNER\AppData\Local\phoenix-orch-00\target\debug\deps\master_orchestrator-99d8a90e6aa515f1.exe)
+
+running 16 tests
+test planner::tests::agent_in_circuit_cooldown_returns_false_for_non_unhealthy_or_missing_deadline ... ok
+test executor::tests::compute_backoff_ms_grows_exponentially_and_is_capped ... ok
+test planner::tests::agent_in_circuit_cooldown_checks_future_and_past_deadlines ... ok
+test executor::tests::map_agent_failure_to_agent_error_classifies_response_codes ... ok
+test config_service::tests::merge_app_config_overlay_wins_for_llm_and_agents ... ok
+test executor::tests::map_agent_failure_to_agent_error_classifies_tool_errors ... ok
+test planner::tests::test_estimate_tokens ... ok
+test api::auth::tests::test_jwt_token_creation_and_validation ... ok
+test planner::tests::test_truncate_context_to_fit ... ok
+test api::audit_middleware::tests::test_audit_middleware ... ok
+test config_service::tests::load_single_config_substitutes_env_vars_brace_syntax ... FAILED
+test config_service::tests::load_single_config_substitutes_env_vars_dollar_syntax ... FAILED
+test api::validation::tests::test_ws_validation ... ok
+test api::validation::tests::test_chat_validation ... ok
+test memory::semantic::tests::test_store_and_retrieve ... ok
+test memory::semantic::tests::test_search_similar ... ok
+
+failures:
+
+---- config_service::tests::load_single_config_substitutes_env_vars_brace_syntax stdout ----
+
+thread 'config_service::tests::load_single_config_substitutes_env_vars_brace_syntax' (24012) panicked at core\master_orchestrator\src\config_service.rs:245:9:
+assertion `left == right` failed
+  left: Some("{OPENROUTER_API_KEY}")
+ right: Some("test-key-123")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- config_service::tests::load_single_config_substitutes_env_vars_dollar_syntax stdout ----
+
+thread 'config_service::tests::load_single_config_substitutes_env_vars_dollar_syntax' (12420) panicked at core\master_orchestrator\src\config_service.rs:272:9:
+assertion `left == right` failed
+  left: Some("${ANTHROPIC_API_KEY}")
+ right: Some("anthropic-key-xyz")
+
+
+failures:
+    config_service::tests::load_single_config_substitutes_env_vars_brace_syntax
+    config_service::tests::load_single_config_substitutes_env_vars_dollar_syntax
+
+test result: FAILED. 14 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `--lib`

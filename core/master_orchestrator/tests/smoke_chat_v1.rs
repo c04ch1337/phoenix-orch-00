@@ -49,7 +49,11 @@ async fn smoke_chat_v1_returns_well_formed_response() {
         memory_service: memory_service.clone(),
         app_config: app_config.clone(),
         tool_service: tool_service.clone(),
-        auth_token: None,
+        jwt_auth: None,
+        rate_limit_config: api::rate_limit::RateLimitConfig {
+            requests: std::num::NonZeroU32::new(100).unwrap(),
+            window_secs: 60,
+        },
     };
 
     let app = test::init_service(

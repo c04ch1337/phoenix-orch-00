@@ -19,10 +19,9 @@ impl SecurityAuditMiddleware {
         }
     }
 }
-
 impl<S, B> Transform<S, ServiceRequest> for SecurityAuditMiddleware
 where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + Clone + 'static,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
     B: 'static,
 {
@@ -40,7 +39,6 @@ where
     }
 }
 
-#[derive(Clone)]
 pub struct SecurityAuditMiddlewareService<S> {
     service: S,
     logger: Arc<AuditLogger>,
@@ -48,7 +46,7 @@ pub struct SecurityAuditMiddlewareService<S> {
 
 impl<S, B> Service<ServiceRequest> for SecurityAuditMiddlewareService<S>
 where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + Clone + 'static,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
     B: 'static,
 {
