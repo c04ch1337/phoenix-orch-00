@@ -5,6 +5,7 @@ default_provider = "openrouter"
 api_key = "{{OPENROUTER_API_KEY}}"
 model_name = "anthropic/claude-3.5-sonnet"
 base_url = "https://openrouter.ai/api/v1"
+max_input_tokens = 32000
 
 [llm.gemini]
 api_key = "{{GEMINI_API_KEY}}"

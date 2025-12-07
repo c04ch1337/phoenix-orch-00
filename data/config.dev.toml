@@ -5,6 +5,7 @@ default_provider = "openrouter"
 api_key = "{{OPENROUTER_API_KEY}}"
 base_url = "https://openrouter.ai/api/v1"
 model_name = "anthropic/claude-3.5-sonnet"
+max_input_tokens = 32000
 
 [llm.openai]
 api_key = "{{OPENAI_API_KEY}}"
