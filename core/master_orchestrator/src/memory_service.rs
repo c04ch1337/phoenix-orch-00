@@ -2,11 +2,9 @@ use rusqlite::{params, Connection};
 use shared_types::{ActionRequest, ActionResponse};
 use std::sync::{Arc, Mutex};
 use tokio::task;
-use std::fs;
-use std::path::Path;
-use std::io::Write;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use uuid::Uuid;
+
+use crate::memory::semantic::{SemanticMemory, generate_simple_embedding};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -21,13 +19,20 @@ pub struct AgentConfig {
 #[derive(Clone)]
 pub struct MemoryService {
     conn: Arc<Mutex<Connection>>,
+    semantic: Arc<SemanticMemory>,
 }
 
 impl MemoryService {
-    pub fn new(db_path: &str) -> Result<Self, String> {
+    pub fn new(db_path: &str, rocksdb_path: &str) -> Result<Self, String> {
         let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+        
+        // Initialize RocksDB for semantic memory
+        let semantic = SemanticMemory::init(rocksdb_path)
+            .map_err(|e| format!("RocksDB init failed: {}", e))?;
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            semantic: Arc::new(semantic),
         })
     }
 
@@ -76,9 +81,8 @@ impl MemoryService {
         .await
         .map_err(|e| e.to_string())??;
 
-        // Layer 2: Semantic Memory (Flat-File Directories)
-        fs::create_dir_all("./data/memory/text").map_err(|e| e.to_string())?;
-        fs::create_dir_all("./data/memory/vectors").map_err(|e| e.to_string())?;
+        // Layer 2: Semantic Memory is now handled by RocksDB (no flat file dirs needed)
+        println!("Semantic Memory (RocksDB) initialized");
 
         Ok(())
     }
@@ -213,116 +217,44 @@ impl MemoryService {
         .map_err(|e| e.to_string())?
     }
 
-    // --- Layer 2: Semantic Memory (Flat-File Vector) ---
-
-    // 200-Year Longevity: Pure Rust "SimpleHashEmbedding"
-    // Maps words to a fixed-size vector (128 dimensions) using hashing.
-    // No external dependencies, no models to download, no C++ runtimes.
-    fn generate_simple_embedding(text: &str) -> Vec<f32> {
-        const DIM: usize = 128;
-        let mut vector = vec![0.0; DIM];
-        let words = text.split_whitespace();
-        
-        for word in words {
-            let mut hasher = DefaultHasher::new();
-            word.hash(&mut hasher);
-            let hash = hasher.finish();
-            let index = (hash as usize) % DIM;
-            vector[index] += 1.0;
-        }
-
-        // Normalize
-        let magnitude: f32 = vector.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if magnitude > 0.0 {
-            for x in &mut vector {
-                *x /= magnitude;
-            }
-        }
-        
-        vector
-    }
+    // --- Layer 2: Semantic Memory (RocksDB) ---
 
     pub async fn store_semantic_memory(&self, text: &str) -> Result<(), String> {
         let text_content = text.to_string();
+        let semantic = self.semantic.clone();
 
-        // 1. Generate Embedding (Pure Rust)
-        let embedding = Self::generate_simple_embedding(&text_content);
-
-        // 2. Save to Flat Files
-        let id = uuid::Uuid::new_v4().to_string();
-        
-        // Save Text
-        let text_path = format!("./data/memory/text/{}.txt", id);
-        fs::write(&text_path, text).map_err(|e| e.to_string())?;
-
-        // Save Vector (Binary)
-        let vec_path = format!("./data/memory/vectors/{}.bin", id);
-        let mut file = fs::File::create(&vec_path).map_err(|e| e.to_string())?;
-        for &val in &embedding {
-            let bytes = val.to_le_bytes();
-            file.write_all(&bytes).map_err(|e| e.to_string())?;
-        }
-
-        Ok(())
+        // Run in blocking task since RocksDB operations are synchronous
+        task::spawn_blocking(move || {
+            // Generate embedding
+            let embedding = generate_simple_embedding(&text_content);
+            
+            // Generate UUID
+            let id = Uuid::new_v4();
+            
+            // Store in RocksDB
+            semantic.store_context(&id, &text_content, &embedding)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 
     pub async fn retrieve_semantic_context(&self, query: &str, k: usize) -> Result<Vec<String>, String> {
         let query_text = query.to_string();
+        let semantic = self.semantic.clone();
 
-        // 1. Generate Query Embedding (Pure Rust)
-        let query_vec = Self::generate_simple_embedding(&query_text);
-
-        // 2. Scan Flat Files (Linear Search - 200 Year Simplicity)
-        let vec_dir = Path::new("./data/memory/vectors");
-        let mut scores: Vec<(String, f32)> = Vec::new();
-
-        if vec_dir.exists() {
-            for entry in fs::read_dir(vec_dir).map_err(|e| e.to_string())? {
-                let entry = entry.map_err(|e| e.to_string())?;
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("bin") {
-                    let id = path.file_stem().unwrap().to_string_lossy().to_string();
-                    
-                    // Read vector
-                    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-                    let mut vector = Vec::new();
-                    for chunk in bytes.chunks(4) {
-                        if chunk.len() == 4 {
-                            let val = f32::from_le_bytes(chunk.try_into().unwrap());
-                            vector.push(val);
-                        }
-                    }
-
-                    // Cosine Similarity
-                    let score = cosine_similarity(&query_vec, &vector);
-                    scores.push((id, score));
-                }
-            }
-        }
-
-        // 3. Sort and Retrieve Text
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let top_k = scores.into_iter().take(k).collect::<Vec<_>>();
-
-        let mut results = Vec::new();
-        for (id, _score) in top_k {
-            let text_path = format!("./data/memory/text/{}.txt", id);
-            if let Ok(content) = fs::read_to_string(text_path) {
-                results.push(content);
-            }
-        }
-
-        Ok(results)
-    }
-}
-
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot_product: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        dot_product / (norm_a * norm_b)
+        task::spawn_blocking(move || {
+            // Generate query embedding
+            let query_vec = generate_simple_embedding(&query_text);
+            
+            // Search in RocksDB
+            let results = semantic.search_similar(&query_vec, k)
+                .map_err(|e| e.to_string())?;
+            
+            // Extract just the text content
+            Ok(results.into_iter().map(|(_, text)| text).collect())
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 }

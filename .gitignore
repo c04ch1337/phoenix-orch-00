@@ -3,3 +3,8 @@
 /data/*.db
 /data/*.bin
 .env
+
+# Ignore runtime-generated database files
+/data/rocksdb/
+/data/memory/text/
+/data/memory/vectors/

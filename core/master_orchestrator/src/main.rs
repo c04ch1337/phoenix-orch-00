@@ -6,6 +6,7 @@ mod executor;
 mod planner;
 mod memory_service;
 mod config_service;
+mod memory;
 
 use memory_service::MemoryService;
 
@@ -71,9 +72,11 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    // Initialize GAI Memory
-    let db_path = "./data/memory_kg.db";
-    let memory_service = match MemoryService::new(db_path) {
+    // Initialize GAI Memory with RocksDB
+    let sqlite_path = "./data/memory_kg.db";
+    let rocksdb_path = "./data/rocksdb/semantic_memory";
+    
+    let memory_service = match MemoryService::new(sqlite_path, rocksdb_path) {
         Ok(service) => Arc::new(service),
         Err(e) => {
             eprintln!("Failed to initialize memory service: {}", e);
@@ -85,7 +88,7 @@ async fn main() -> std::io::Result<()> {
         eprintln!("Failed to initialize GAI memory tables: {}", e);
         return Ok(());
     }
-    println!("GAI Memory initialized at {}", db_path);
+    println!("GAI Memory initialized (SQLite: {}, RocksDB: {})", sqlite_path, rocksdb_path);
 
     // Register Agents
     if let Err(e) = memory_service.register_agent("git_agent", "git_agent", "Handles Git operations").await {
