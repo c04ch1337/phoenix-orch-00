@@ -98,6 +98,25 @@ frame-ancestors 'none';";
 
         App::new()
             .app_data(web::Data::new(api_ctx_clone.clone()))
+            // Configure JSON payload limits for both requests and responses
+            // Default is 2MB which causes large LLM responses to fail
+            .app_data(
+                web::JsonConfig::default()
+                    .limit(50 * 1024 * 1024) // 50MB limit for JSON payloads
+                    .error_handler(|err, _req| {
+                        // Custom error handler for better error messages
+                        let error_msg = format!("JSON payload error: {}", err);
+                        tracing::warn!("JSON payload error: {}", error_msg);
+                        actix_web::error::InternalError::from_response(
+                            err,
+                            actix_web::HttpResponse::BadRequest()
+                                .json(serde_json::json!({
+                                    "error": "Invalid JSON payload",
+                                    "details": error_msg,
+                                }))
+                        ).into()
+                    })
+            )
             .configure(|cfg| {
                 api::configure_http(cfg, api_ctx_clone.clone());
                 api::configure_ws(cfg, api_ctx_clone.clone());
@@ -105,6 +124,7 @@ frame-ancestors 'none';";
             .wrap(security_headers)
             .wrap(cors)
             .service(actix_files::Files::new("/", &frontend_path_clone).index_file("index.html"))
+
     })
     .bind(bind_addr)?
     .run();

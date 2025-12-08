@@ -278,7 +278,24 @@ async function sendMessage(message) {
         });
 
         if (!resp.ok) {
-            throw new Error(`Request failed (${resp.status} ${resp.statusText})`);
+            // Try to read error response body for better error messages
+            let errorMessage = `Request failed (${resp.status} ${resp.statusText})`;
+            try {
+                const errorData = await resp.json();
+                if (errorData.error) {
+                    errorMessage = errorData.error;
+                    if (errorData.details) {
+                        errorMessage += `: ${errorData.details}`;
+                    }
+                    if (errorData.request_id) {
+                        console.error('Request ID:', errorData.request_id);
+                    }
+                }
+            } catch (e) {
+                // If we can't parse JSON, use the status text
+                console.warn('Could not parse error response:', e);
+            }
+            throw new Error(errorMessage);
         }
 
         const data = await resp.json();
