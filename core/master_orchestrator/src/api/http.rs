@@ -1,27 +1,16 @@
 use std::sync::Arc;
 
 use actix_web::{web, Error, HttpRequest, HttpResponse};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use super::ApiContext;
 use crate::memory_service::MemoryService;
 use crate::planner;
 use crate::tool_service::ToolService;
-use platform::record_counter;
+use platform::{correlation_span, extract_correlation_id, record_counter};
 use shared_types::{AppConfig, ChatRequestV1, ChatResponseV1, CorrelationId, API_VERSION_CURRENT};
+use tracing::{error, info, Instrument};
 
-/// Legacy chat payload and response types used by `/api/chat`.
-#[derive(Deserialize, Debug)]
-pub struct ChatPayload {
-    pub message: String,
-    pub context: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct ChatResponse {
-    pub status: String,
-    pub output: String,
-}
 
 /// Simple health response used by `/health`.
 #[derive(Serialize)]
@@ -35,7 +24,6 @@ pub fn configure(cfg: &mut web::ServiceConfig, ctx: ApiContext) {
     let ctx_data = web::Data::new(ctx);
 
     cfg.app_data(ctx_data.clone())
-        .route("/api/chat", web::post().to(chat_legacy))
         .route("/api/v1/chat", web::post().to(chat_v1))
         .route("/api/v1/agents", web::get().to(list_agents))
         .route("/health", web::get().to(health));
@@ -82,49 +70,6 @@ pub async fn require_auth(req: &HttpRequest, ctx: &ApiContext) -> Result<(), Htt
     }
 }
 
-// Legacy /api/chat endpoint - preserves existing behavior and payload shape.
-async fn chat_legacy(
-    req: HttpRequest,
-    payload: web::Json<ChatPayload>,
-    ctx: web::Data<ApiContext>,
-) -> Result<HttpResponse, Error> {
-    if let Err(resp) = require_auth(&req, ctx.get_ref()).await {
-        return Ok(resp);
-    }
-    record_counter("http_requests_total_chat_legacy", 1);
-
-    println!("[INFO] Received /api/chat request: {:?}", payload);
-
-    let memory_service: Arc<MemoryService> = ctx.memory_service.clone();
-    let app_config: Arc<AppConfig> = ctx.app_config.clone();
-    let tool_service: Arc<ToolService> = ctx.tool_service.clone();
-
-    match planner::plan_and_execute(
-        payload.message.clone(),
-        memory_service,
-        app_config,
-        tool_service,
-    )
-    .await
-    {
-        Ok(response) => {
-            let chat_response = ChatResponse {
-                status: "success".to_string(),
-                output: serde_json::to_string(&response.result).unwrap_or_default(),
-            };
-            Ok(HttpResponse::Ok().json(chat_response))
-        }
-        Err(e) => {
-            eprintln!("[ERROR] plan_and_execute failed: {}", e);
-            let chat_response = ChatResponse {
-                status: "error".to_string(),
-                output: e,
-            };
-            // Keep HTTP 200 for front-end compatibility, but payload clearly indicates error
-            Ok(HttpResponse::Ok().json(chat_response))
-        }
-    }
-}
 
 // New versioned /api/v1/chat endpoint using shared ChatRequestV1/ChatResponseV1 contracts.
 async fn chat_v1(
@@ -132,133 +77,222 @@ async fn chat_v1(
     body: web::Json<ChatRequestV1>,
     ctx: web::Data<ApiContext>,
 ) -> Result<HttpResponse, Error> {
-    if let Err(resp) = require_auth(&req, ctx.get_ref()).await {
-        return Ok(resp);
-    }
-    record_counter("http_requests_total_chat_v1", 1);
-
-    handle_chat(body.into_inner(), ctx).await
+    // Use existing correlation ID if provided, or create a new one
+    let correlation_id = extract_correlation_id(body.correlation_id);
+    let span = correlation_span(correlation_id, "chat_v1");
+    
+    // Execute within the correlation span
+    async move {
+        if let Err(resp) = require_auth(&req, ctx.get_ref()).await {
+            return Ok(resp);
+        }
+        record_counter("http_requests_total_chat_v1", 1);
+        
+        info!(
+            correlation_id = %correlation_id,
+            endpoint = "/api/v1/chat",
+            message_length = body.message.len(),
+            has_context = body.context.is_some(),
+            "Received v1 chat request"
+        );
+        
+        handle_chat(body.into_inner(), ctx, correlation_id).await
+    }.instrument(span).await
 }
 
 async fn handle_chat(
     mut req: ChatRequestV1,
     ctx: web::Data<ApiContext>,
+    correlation_id: CorrelationId,
 ) -> Result<HttpResponse, Error> {
-    let correlation_id: CorrelationId = req.correlation_id.unwrap_or_else(uuid::Uuid::new_v4);
-
+    // Ensure correlation ID is set in the request
     req.correlation_id = Some(correlation_id);
+    
+    // Create a span for this operation
+    let span = correlation_span(correlation_id, "handle_chat");
+    
+    // Execute within the correlation span
+    async move {
+        let result = planner::plan_and_execute_v1(
+            correlation_id,
+            req.message.clone(),
+            req.context.clone(),
+            ctx.memory_service.clone(),
+            ctx.app_config.clone(),
+            ctx.tool_service.clone(),
+        )
+        .await;
 
-    let result = planner::plan_and_execute_v1(
-        correlation_id,
-        req.message.clone(),
-        req.context.clone(),
-        ctx.memory_service.clone(),
-        ctx.app_config.clone(),
-        ctx.tool_service.clone(),
-    )
-    .await;
-
-    match result {
-        Ok(out) => {
-            let resp = ChatResponseV1 {
-                api_version: API_VERSION_CURRENT,
-                correlation_id,
-                status: "success".to_string(),
-                plan_id: Some(out.plan_id),
-                output: Some(out.user_facing_output),
-                error: None,
-            };
-            Ok(HttpResponse::Ok().json(resp))
+        match result {
+            Ok(out) => {
+                info!(
+                    correlation_id = %correlation_id,
+                    endpoint = "/api/v1/chat",
+                    status = "success",
+                    plan_id = %out.plan_id,
+                    "Chat v1 request succeeded"
+                );
+                
+                let resp = ChatResponseV1 {
+                    api_version: API_VERSION_CURRENT,
+                    correlation_id,
+                    status: "success".to_string(),
+                    plan_id: Some(out.plan_id),
+                    output: Some(out.user_facing_output),
+                    error: None,
+                };
+                Ok(HttpResponse::Ok().json(resp))
+            }
+            Err(e) => {
+                error!(
+                    correlation_id = %correlation_id,
+                    endpoint = "/api/v1/chat",
+                    status = "error",
+                    plan_id = ?e.plan_id,
+                    error_code = ?e.error.code,
+                    error_message = %e.error.message,
+                    "Chat v1 request failed"
+                );
+                
+                let resp = ChatResponseV1 {
+                    api_version: API_VERSION_CURRENT,
+                    correlation_id,
+                    status: "error".to_string(),
+                    plan_id: e.plan_id,
+                    output: None,
+                    error: Some(e.error),
+                };
+                Ok(HttpResponse::Ok().json(resp))
+            }
         }
-        Err(e) => {
-            let resp = ChatResponseV1 {
-                api_version: API_VERSION_CURRENT,
-                correlation_id,
-                status: "error".to_string(),
-                plan_id: e.plan_id,
-                output: None,
-                error: Some(e.error),
-            };
-            Ok(HttpResponse::Ok().json(resp))
-        }
-    }
+    }.instrument(span).await
 }
 
 async fn list_agents(req: HttpRequest, ctx: web::Data<ApiContext>) -> Result<HttpResponse, Error> {
-    if let Err(resp) = require_auth(&req, ctx.get_ref()).await {
-        return Ok(resp);
-    }
-    record_counter("http_requests_total_agents_v1", 1);
+    // Generate correlation ID for this request
+    let correlation_id = extract_correlation_id(None);
+    let span = correlation_span(correlation_id, "list_agents");
+    
+    // Execute within the correlation span
+    async move {
+        if let Err(resp) = require_auth(&req, ctx.get_ref()).await {
+            return Ok(resp);
+        }
+        record_counter("http_requests_total_agents_v1", 1);
+        
+        info!(
+            correlation_id = %correlation_id,
+            endpoint = "/api/v1/agents",
+            "Retrieving agent health"
+        );
 
-    let summaries = ctx
-        .memory_service
-        .list_agent_health()
-        .await
-        .map_err(actix_web::error::ErrorInternalServerError)?;
-
-    Ok(HttpResponse::Ok().json(summaries))
+        match ctx.memory_service.list_agent_health().await {
+            Ok(summaries) => {
+                info!(
+                    correlation_id = %correlation_id,
+                    endpoint = "/api/v1/agents",
+                    agent_count = summaries.len(),
+                    "Agent health retrieved successfully"
+                );
+                Ok(HttpResponse::Ok().json(summaries))
+            },
+            Err(e) => {
+                error!(
+                    correlation_id = %correlation_id,
+                    endpoint = "/api/v1/agents",
+                    error = %e,
+                    "Failed to retrieve agent health"
+                );
+                Err(actix_web::error::ErrorInternalServerError(e))
+            }
+        }
+    }.instrument(span).await
 }
 
 async fn health(req: HttpRequest, ctx: web::Data<ApiContext>) -> Result<HttpResponse, Error> {
-    if let Err(resp) = require_auth(&req, ctx.get_ref()).await {
-        return Ok(resp);
-    }
-    record_counter("http_requests_total_health", 1);
+    // Generate correlation ID for this request
+    let correlation_id = extract_correlation_id(None);
+    let span = correlation_span(correlation_id, "health");
+    
+    // Execute within the correlation span
+    async move {
+        if let Err(resp) = require_auth(&req, ctx.get_ref()).await {
+            return Ok(resp);
+        }
+        record_counter("http_requests_total_health", 1);
+        
+        info!(
+            correlation_id = %correlation_id,
+            endpoint = "/health",
+            "Health check initiated"
+        );
 
-    let app_config: Arc<AppConfig> = ctx.app_config.clone();
+        let app_config: Arc<AppConfig> = ctx.app_config.clone();
 
-    let provider = app_config.llm.default_provider.clone();
-    let model = match provider.as_str() {
-        "openrouter" => app_config
-            .llm
-            .openrouter
-            .as_ref()
-            .map(|c| c.model_name.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        "gemini" => app_config
-            .llm
-            .gemini
-            .as_ref()
-            .map(|c| c.model_name.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        "grok" => app_config
-            .llm
-            .grok
-            .as_ref()
-            .map(|c| c.model_name.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        "openai" => app_config
-            .llm
-            .openai
-            .as_ref()
-            .map(|c| c.model_name.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        "anthropic" => app_config
-            .llm
-            .anthropic
-            .as_ref()
-            .map(|c| c.model_name.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        "ollama" => app_config
-            .llm
-            .ollama
-            .as_ref()
-            .map(|c| c.model_name.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        "lmstudio" => app_config
-            .llm
-            .lmstudio
-            .as_ref()
-            .map(|c| c.model_name.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        _ => "unknown".to_string(),
-    };
+        let provider = app_config.llm.default_provider.clone();
+        let model = match provider.as_str() {
+            "openrouter" => app_config
+                .llm
+                .openrouter
+                .as_ref()
+                .map(|c| c.model_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "gemini" => app_config
+                .llm
+                .gemini
+                .as_ref()
+                .map(|c| c.model_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "grok" => app_config
+                .llm
+                .grok
+                .as_ref()
+                .map(|c| c.model_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "openai" => app_config
+                .llm
+                .openai
+                .as_ref()
+                .map(|c| c.model_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "anthropic" => app_config
+                .llm
+                .anthropic
+                .as_ref()
+                .map(|c| c.model_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "ollama" => app_config
+                .llm
+                .ollama
+                .as_ref()
+                .map(|c| c.model_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "lmstudio" => app_config
+                .llm
+                .lmstudio
+                .as_ref()
+                .map(|c| c.model_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            _ => "unknown".to_string(),
+        };
 
-    let health = HealthResponse {
-        status: "ok",
-        llm_provider: provider,
-        llm_model: model,
-    };
+        let provider_clone = provider.clone();
+        let model_clone = model.clone();
+        
+        let health = HealthResponse {
+            status: "ok",
+            llm_provider: provider,
+            llm_model: model,
+        };
 
-    Ok(HttpResponse::Ok().json(health))
+        info!(
+            correlation_id = %correlation_id,
+            endpoint = "/health",
+            llm_provider = %provider_clone,
+            llm_model = %model_clone,
+            "Health check completed successfully"
+        );
+
+        Ok(HttpResponse::Ok().json(health))
+    }.instrument(span).await
 }

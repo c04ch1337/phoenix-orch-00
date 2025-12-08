@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::info;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

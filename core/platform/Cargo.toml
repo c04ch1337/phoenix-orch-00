@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 thiserror = { workspace = true }

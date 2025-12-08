@@ -1,7 +1,7 @@
 use actix_web::{
     dev::{Service, ServiceRequest, ServiceResponse, Transform},
     web, Error, HttpResponse, HttpMessage,
-    body::{BoxBody, MessageBody, EitherBody},
+    body::{MessageBody, EitherBody},
 };
 use actix_web::http::Method;
 use futures_util::future::{ready, LocalBoxFuture, Ready};
@@ -17,49 +17,83 @@ pub struct ValidationSchemas {
 
 impl ValidationSchemas {
     pub fn new() -> Self {
-        // Chat request schema
+        // Enhanced chat request schema with additional validation
         let schema_value = serde_json::json!({
             "type": "object",
             "required": ["message"],
             "properties": {
                 "message": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 32768, // Prevent excessive message size (32KB limit)
+                    "description": "The message content to send"
                 },
                 "context": {
-                    "type": ["string", "null"]
+                    "type": ["string", "null"],
+                    "maxLength": 65536,  // 64KB limit on context
+                    "description": "Optional conversation context"
                 },
                 "correlation_id": {
                     "type": ["string", "null"],
-                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                    "description": "Optional UUID v4 for request correlation"
+                },
+                "model": {
+                    "type": ["string", "null"],
+                    "description": "Optional model identifier"
+                },
+                "stream": {
+                    "type": ["boolean", "null"],
+                    "description": "Whether to stream the response"
                 }
             },
             "additionalProperties": false
         });
-        let chat_schema = JSONSchema::options()
+        
+        let chat_schema = match JSONSchema::options()
             .with_draft(Draft::Draft7)
-            .compile(&schema_value)
-            .expect("Invalid chat schema");
+            .compile(&schema_value) {
+                Ok(schema) => schema,
+                Err(err) => {
+                    // Log the error and provide a fallback schema
+                    tracing::error!("Failed to compile chat schema: {}", err);
+                    panic!("Invalid chat schema: {}", err)
+                }
+            };
 
-        // WebSocket message schema
+        // Enhanced WebSocket message schema
         let ws_schema_value = serde_json::json!({
             "type": "object",
             "required": ["type"],
             "properties": {
                 "type": {
                     "type": "string",
-                    "enum": ["chat", "subscribe_plan", "unsubscribe_plan"]
+                    "enum": ["chat", "subscribe_plan", "unsubscribe_plan", "ping"],
+                    "description": "The message type"
                 },
                 "payload": {
-                    "type": "object"
+                    "type": "object",
+                    "description": "Message payload content",
+                    "maxProperties": 50 // Prevent excessive object size
+                },
+                "id": {
+                    "type": ["string", "null"],
+                    "maxLength": 64,
+                    "description": "Optional message identifier"
                 }
             },
             "additionalProperties": false
         });
-        let ws_schema = JSONSchema::options()
+        
+        let ws_schema = match JSONSchema::options()
             .with_draft(Draft::Draft7)
-            .compile(&ws_schema_value)
-            .expect("Invalid WebSocket schema");
+            .compile(&ws_schema_value) {
+                Ok(schema) => schema,
+                Err(err) => {
+                    tracing::error!("Failed to compile websocket schema: {}", err);
+                    panic!("Invalid WebSocket schema: {}", err)
+                }
+            };
 
         Self {
             chat_schema: Arc::new(chat_schema),
@@ -161,25 +195,121 @@ where
         let schemas = self.schemas.clone();
         let method = req.method().clone();
         let path = req.path().to_owned();
+        let req_id = uuid::Uuid::new_v4().to_string();
+
+        // Add validation check for request size with content-length header
+        if let Some(content_length) = req.headers().get("content-length") {
+            if let Ok(length) = content_length.to_str() {
+                if let Ok(size) = length.parse::<usize>() {
+                    // 10MB max request size limit
+                    const MAX_SIZE: usize = 10 * 1024 * 1024;
+                    if size > MAX_SIZE {
+                        tracing::warn!(
+                            request_id = %req_id,
+                            path = %path,
+                            content_length = size,
+                            "Request too large"
+                        );
+                        let res = HttpResponse::PayloadTooLarge()
+                            .json(serde_json::json!({
+                                "error": "Request too large",
+                                "max_size_bytes": MAX_SIZE,
+                                "request_id": req_id
+                            }))
+                            .map_into_right_body();
+                        return Box::pin(async move {
+                            Ok(ServiceResponse::new(req.into_parts().0, res))
+                        });
+                    }
+                }
+            }
+        }
+
+        // Store request ID for logging
+        req.extensions_mut().insert(req_id.clone());
 
         if method == Method::POST && path.starts_with("/api") {
             let service = self.service.clone();
             Box::pin(async move {
-                if let Ok(body) = req.extract::<web::Json<Value>>().await {
-                    if path.ends_with("/chat") {
-                        if let Err(err) = schemas.validate_chat(&body.into_inner()) {
-                            let res = HttpResponse::BadRequest()
-                                .body(err.to_string())
-                                .map_into_right_body();
-                            return Ok(ServiceResponse::new(req.into_parts().0, res));
+                // Process API request validation
+                match req.extract::<web::Json<Value>>().await {
+                    Ok(body) => {
+                        let body_value = body.into_inner();
+                        
+                        // Log validation attempt
+                        tracing::debug!(
+                            request_id = %req_id,
+                            path = %path,
+                            "Validating request"
+                        );
+                        
+                        // Validate based on endpoint
+                        if path.ends_with("/chat") {
+                            if let Err(err) = schemas.validate_chat(&body_value) {
+                                tracing::warn!(
+                                    request_id = %req_id,
+                                    path = %path,
+                                    validation_error = %err,
+                                    "Chat request validation failed"
+                                );
+                                
+                                let res = HttpResponse::BadRequest()
+                                    .json(serde_json::json!({
+                                        "error": "Validation error",
+                                        "details": err.to_string(),
+                                        "request_id": req_id
+                                    }))
+                                    .map_into_right_body();
+                                return Ok(ServiceResponse::new(req.into_parts().0, res));
+                            }
+                        } else if path.ends_with("/ws") {
+                            if let Err(err) = schemas.validate_ws(&body_value) {
+                                tracing::warn!(
+                                    request_id = %req_id,
+                                    path = %path,
+                                    validation_error = %err,
+                                    "WebSocket request validation failed"
+                                );
+                                
+                                let res = HttpResponse::BadRequest()
+                                    .json(serde_json::json!({
+                                        "error": "Validation error",
+                                        "details": err.to_string(),
+                                        "request_id": req_id
+                                    }))
+                                    .map_into_right_body();
+                                return Ok(ServiceResponse::new(req.into_parts().0, res));
+                            }
                         }
+                        
+                        // Validation passed, continue processing
+                        tracing::debug!(
+                            request_id = %req_id,
+                            path = %path,
+                            "Request validation passed"
+                        );
+                    },
+                    Err(err) => {
+                        // Log JSON parse failure
+                        tracing::warn!(
+                            request_id = %req_id,
+                            path = %path,
+                            error = %err,
+                            "Failed to parse JSON body"
+                        );
+                        
+                        let res = HttpResponse::BadRequest()
+                            .json(serde_json::json!({
+                                "error": "Invalid JSON",
+                                "details": "Could not parse request body",
+                                "request_id": req_id
+                            }))
+                            .map_into_right_body();
+                        return Ok(ServiceResponse::new(req.into_parts().0, res));
                     }
-                } else {
-                    let res = HttpResponse::BadRequest()
-                        .finish()
-                        .map_into_right_body();
-                    return Ok(ServiceResponse::new(req.into_parts().0, res));
                 }
+                
+                // Continue with the request
                 Ok(service.call(req).await?.map_into_left_body())
             })
         } else {

@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shared_types::{ActionRequest, ActionResponse, ActionResult};
+use shared_types::{ActionRequest, ActionResponse, ActionResult, ActionError};
 use std::io::{self, Read};
 use std::path::Path;
 use std::process::{exit, Command, Stdio};
@@ -179,7 +179,12 @@ fn handle_request(repo_root: &Path, request: ActionRequest) -> Result<ActionResp
                         status: "error".to_string(),
                         code: 400,
                         result: Some(result),
-                        error: Some(err_msg),
+                        error: Some(ActionError {
+                            code: 400,
+                            message: err_msg,
+                            detail: String::new(),
+                            raw_output: None,
+                        }),
                         plan_id: request.plan_id,
                         task_id: request.task_id,
                         correlation_id: request.correlation_id,
@@ -228,7 +233,12 @@ fn handle_request(repo_root: &Path, request: ActionRequest) -> Result<ActionResp
                     status: "error".to_string(),
                     code: 400,
                     result: Some(result),
-                    error: Some(msg),
+                    error: Some(ActionError {
+                        code: 400,
+                        message: msg,
+                        detail: String::new(),
+                        raw_output: None,
+                    }),
                     plan_id: request.plan_id,
                     task_id: request.task_id,
                     correlation_id: request.correlation_id,
@@ -252,7 +262,12 @@ fn handle_request(repo_root: &Path, request: ActionRequest) -> Result<ActionResp
                         status: "error".to_string(),
                         code: 400,
                         result: Some(result),
-                        error: Some(err_msg),
+                        error: Some(ActionError {
+                            code: 400,
+                            message: err_msg,
+                            detail: String::new(),
+                            raw_output: None,
+                        }),
                         plan_id: request.plan_id,
                         task_id: request.task_id,
                         correlation_id: request.correlation_id,
@@ -287,7 +302,12 @@ fn handle_request(repo_root: &Path, request: ActionRequest) -> Result<ActionResp
                         status: "error".to_string(),
                         code: 400,
                         result: Some(result),
-                        error: Some(msg),
+                        error: Some(ActionError {
+                            code: 400,
+                            message: msg,
+                            detail: String::new(),
+                            raw_output: None,
+                        }),
                         plan_id: request.plan_id,
                         task_id: request.task_id,
                         correlation_id: request.correlation_id,
@@ -311,7 +331,12 @@ fn handle_request(repo_root: &Path, request: ActionRequest) -> Result<ActionResp
                 status: "error".to_string(),
                 code: 501,
                 result: Some(result),
-                error: Some(msg),
+                error: Some(ActionError {
+                    code: 501,
+                    message: msg,
+                    detail: String::new(),
+                    raw_output: None,
+                }),
                 plan_id: request.plan_id,
                 task_id: request.task_id,
                 correlation_id: request.correlation_id,

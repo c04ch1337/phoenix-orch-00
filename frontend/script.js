@@ -136,7 +136,22 @@ async function handleSend() {
                 setAppState(State.Degraded);
             }
         } else {
-            appendMessage('Error', response.output || 'Unknown error', 'agent');
+            // Handle structured error objects from ActionError
+            if (response.error && typeof response.error === 'object') {
+                let errorObj = response.error;
+
+                // Handle both ActionError from agents and OrchestratorError from API
+                const errorMessage = errorObj.message || 'An error occurred';
+                const errorDetail = errorObj.detail ||
+                    (errorObj.details ? JSON.stringify(errorObj.details, null, 2) : null) ||
+                    'No additional details available';
+
+                // Show error with expandable technical details
+                appendMessage('Error', errorMessage, 'agent', false, true, errorDetail);
+            } else {
+                // Fallback to previous behavior for backward compatibility
+                appendMessage('Error', response.output || 'Unknown error', 'agent');
+            }
             setAppState(State.Error);
         }
     } catch (error) {
@@ -171,7 +186,7 @@ function setSafeContent(contentDiv, text) {
     });
 }
 
-function appendMessage(role, text, type, isLoading = false) {
+function appendMessage(role, text, type, isLoading = false, hasErrorDetails = false, errorDetails = null) {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${type}`;
     const id = 'msg-' + Date.now();
@@ -184,8 +199,37 @@ function appendMessage(role, text, type, isLoading = false) {
     const contentDiv = document.createElement('div');
     contentDiv.className = 'content';
 
-    // Render content in a DOM-safe way (no innerHTML for user/LLM text).
+    // Regular message content
     setSafeContent(contentDiv, text);
+
+    // Add error details as expandable section if present
+    if (hasErrorDetails && errorDetails) {
+        // Add spacer
+        contentDiv.appendChild(document.createElement('br'));
+        contentDiv.appendChild(document.createElement('br'));
+
+        // Create button for toggling details
+        const detailsBtn = document.createElement('button');
+        detailsBtn.className = 'error-details-btn';
+        detailsBtn.textContent = 'Show Technical Details';
+        detailsBtn.dataset.collapsed = 'true';
+        contentDiv.appendChild(detailsBtn);
+
+        // Create technical details container
+        const detailsContainer = document.createElement('div');
+        detailsContainer.className = 'error-details';
+        detailsContainer.style.display = 'none';
+        setSafeContent(detailsContainer, errorDetails);
+        contentDiv.appendChild(detailsContainer);
+
+        // Add click handler for the button
+        detailsBtn.addEventListener('click', function () {
+            const isCollapsed = this.dataset.collapsed === 'true';
+            detailsContainer.style.display = isCollapsed ? 'block' : 'none';
+            this.textContent = isCollapsed ? 'Hide Technical Details' : 'Show Technical Details';
+            this.dataset.collapsed = isCollapsed ? 'false' : 'true';
+        });
+    }
 
     msgDiv.appendChild(roleSpan);
     msgDiv.appendChild(contentDiv);
@@ -245,6 +289,7 @@ async function sendMessage(message) {
             return {
                 status: data.status,
                 output: data.output || '',
+                error: data.error, // Include structured error object from ChatResponseV1
                 correlation_id: data.correlation_id,
             };
         }
@@ -253,6 +298,7 @@ async function sendMessage(message) {
         return {
             status: data.status,
             output: data.output,
+            error: undefined,
             correlation_id: undefined,
         };
     };

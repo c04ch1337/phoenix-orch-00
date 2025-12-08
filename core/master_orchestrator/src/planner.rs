@@ -90,188 +90,6 @@ fn truncate_context_to_fit(
     }
 }
 
-// Planner's main job: turn user intent into an ActionRequest
-// This is the legacy entrypoint used by /api/chat and remains for backward compatibility.
-pub async fn plan_and_execute(
-    user_message: String,
-    memory_service: Arc<MemoryService>,
-    app_config: Arc<AppConfig>,
-    tool_service: Arc<ToolService>,
-) -> Result<ActionResponse, String> {
-    // 1. Check Agent Registry
-    let active_agents = memory_service
-        .get_active_agents()
-        .await
-        .map_err(|e| format!("Memory Error: {}", e))?;
-
-    // 2. Simple Intent Detection (Keyword-based for V1)
-    let target_tool = if user_message.to_lowercase().contains("git")
-        || user_message.to_lowercase().contains("commit")
-    {
-        "git_agent"
-    } else {
-        "llm_router_agent" // Fallback to the future LLM planning agent
-    };
-
-    // 3. Agent Validation Check (The Gatekeeper)
-    if !active_agents.iter().any(|a| a.tool_name == target_tool) {
-        return Err(format!(
-            "Error: Agent '{}' is not registered or active.",
-            target_tool
-        ));
-    }
-
-    // --- Context Retrieval ---
-    let mut context_str = String::new();
-
-    // A. Structured Retrieval (Simple keyword match for now)
-    // In a real system, we'd extract entities. Here we just try the whole message or keywords.
-    if let Ok(facts) = memory_service
-        .retrieve_structured_context(&user_message)
-        .await
-    {
-        if !facts.is_empty() {
-            context_str.push_str("\n[Structured Memory]:\n");
-            for fact in facts {
-                context_str.push_str(&format!("- {}\n", fact));
-            }
-        }
-    }
-
-    // B. Semantic Retrieval
-    if let Ok(memories) = memory_service
-        .retrieve_semantic_context(&user_message, 3)
-        .await
-    {
-        if !memories.is_empty() {
-            context_str.push_str("\n[Semantic Memory]:\n");
-            for mem in memories {
-                context_str.push_str(&format!("- {}\n", mem));
-            }
-        }
-    }
-
-    // 4. Prepare Payload
-    let mut payload_json = json!({ "prompt": user_message });
-
-    // Inject LLM Config if target is llm_router_agent
-    if target_tool == "llm_router_agent" {
-        let default_provider = &app_config.llm.default_provider;
-        let provider_config = match default_provider.as_str() {
-            "openrouter" => &app_config.llm.openrouter,
-            "gemini" => &app_config.llm.gemini,
-            "grok" => &app_config.llm.grok,
-            "openai" => &app_config.llm.openai,
-            "anthropic" => &app_config.llm.anthropic,
-            "ollama" => &app_config.llm.ollama,
-            "lmstudio" => &app_config.llm.lmstudio,
-            _ => &None,
-        };
-
-        if let Some(config) = provider_config {
-            let max_input_tokens = config.max_input_tokens.unwrap_or(128_000); // Default to a large window if not set
-            
-            let (final_context, truncated) = if !context_str.is_empty() {
-                truncate_context_to_fit(&context_str, &user_message, max_input_tokens)
-            } else {
-                (String::new(), false)
-            };
-
-            if truncated {
-                println!("Warning: Context was truncated to fit max_input_tokens={}", max_input_tokens);
-            }
-
-            // Append context to the prompt for the LLM
-            let final_prompt = if !final_context.is_empty() {
-                format!("{}\n\nContext:\n{}", user_message, final_context)
-            } else {
-                user_message.clone()
-            };
-
-            payload_json = json!({
-                "prompt": final_prompt,
-                "config": {
-                    "provider": default_provider,
-                    "api_key": config.api_key,
-                    "base_url": config.base_url,
-                    "model_name": config.model_name
-                }
-            });
-        }
-    }
-
-    // 5. Create the ActionRequest (The Universal Contract)
-    let request = ActionRequest {
-        request_id: Uuid::new_v4(),
-        api_version: None,
-        tool: target_tool.to_string(),
-        action: "execute".to_string(), // Default action for now, agents can parse args
-        context: context_str,          // Also pass context in the dedicated field
-        plan_id: None,
-        task_id: None,
-        correlation_id: None,
-        payload: Payload(payload_json),
-    };
-
-    // 6. Execute based on whether it's a tool or an agent
-    let response = if tool_service.tools.contains_key(target_tool) {
-        // It's a direct tool command
-        let parts: Vec<&str> = user_message.split_whitespace().collect();
-        let params = if parts.len() > 1 { &parts[1..] } else { &[] };
-
-        let tool_result = tool_service.execute_tool(target_tool, params).await?;
-
-        // Wrap the raw string output in an ActionResponse
-        let result = ActionResult {
-            output_type: "text".to_string(),
-            data: tool_result,
-            metadata: None,
-        };
-
-        ActionResponse {
-            request_id: request.request_id,
-            api_version: None,
-            status: "success".to_string(), // Or parse from tool_result if it includes status
-            code: 0,
-            result: Some(result),
-            error: None,
-            plan_id: None,
-            task_id: None,
-            correlation_id: None,
-        }
-    } else {
-        // It's an agent. Resolve a timeout from config (or fall back to a sane default)
-        let timeout_duration = if let Some(agents_cfg) = &app_config.agents {
-            let exec_cfg = match target_tool {
-                "git_agent" => agents_cfg.git_agent.as_ref().unwrap_or(&agents_cfg.default),
-                "obsidian_agent" => agents_cfg
-                    .obsidian_agent
-                    .as_ref()
-                    .unwrap_or(&agents_cfg.default),
-                "llm_router_agent" => agents_cfg
-                    .llm_router_agent
-                    .as_ref()
-                    .unwrap_or(&agents_cfg.default),
-                _ => &agents_cfg.default,
-            };
-            std::time::Duration::from_secs(exec_cfg.timeout_secs)
-        } else {
-            // Legacy default when no agents config is provided.
-            std::time::Duration::from_secs(30)
-        };
-
-        execute_agent(target_tool, &request, timeout_duration)
-            .await
-            .map_err(|e| e.to_string())?
-    };
-
-    // Log action trace (This will now also index the action semantically!)
-    if let Err(e) = memory_service.log_action_trace(&request, &response).await {
-        eprintln!("Failed to log action trace: {}", e);
-    }
-
-    Ok(response)
-}
 
 /// New v1 planning + execution entrypoint that wires in plan/task lifecycle tracking.
 pub async fn plan_and_execute_v1(
@@ -557,76 +375,125 @@ pub async fn plan_and_execute_v1(
         payload: Payload(payload_json),
     };
 
-    // 7. Execute via the lifecycle-aware executor wrapper.
-    let exec_result = execute_agent_for_task(
-        target_tool,
-        plan_id,
-        root_task_id,
-        correlation_id,
-        &mut request,
-        memory_service.as_ref(),
-        app_config.as_ref(),
-    )
-    .await;
+    // 7. Execute via the lifecycle-aware executor wrapper or use cached LLM router.
+    let exec_result = if target_tool == "llm_router_agent" {
+        // Use cached execution for LLM router agent via shared executor.
 
-    match exec_result {
-        Ok(response) => {
-            // Mark plan as succeeded.
-            memory_service
-                .record_plan_state_change(
-                    plan_id,
-                    PlanStatus::Succeeded,
-                    Some(&user_message),
-                    correlation_id,
-                )
-                .await
-                .map_err(|e| PlanAndExecuteErrorV1 {
-                    correlation_id,
-                    plan_id: Some(plan_id),
-                    error: OrchestratorError {
-                        code: OrchestratorErrorCode::Internal,
-                        message: e,
-                        details: None,
-                    },
-                })?;
-            record_counter("orchestrator_plan_succeeded_total", 1);
+        // Extract Redis config if available
+        let redis_config = app_config.redis.as_ref();
 
-            // Log action trace (This will now also index the action semantically!)
-            if let Err(e) = memory_service.log_action_trace(&request, &response).await {
-                eprintln!("Failed to log action trace: {}", e);
-            }
-
-            let user_facing_output = serde_json::to_string(&response.result).unwrap_or_default();
-
-            Ok(PlanAndExecuteOutputV1 {
-                plan_id,
+        // Update task status to InProgress
+        memory_service
+            .record_task_state_change(
                 root_task_id,
-                user_facing_output,
-            })
-        }
-        Err(e) => {
-            // Mark plan as failed; ignore logging errors here.
-            let _ = memory_service
-                .record_plan_state_change(
-                    plan_id,
-                    PlanStatus::Failed,
-                    Some(&format!("Execution failed: {}", e)),
-                    correlation_id,
-                )
-                .await;
-
-            record_counter("orchestrator_plan_failed_total", 1);
-
-            Err(PlanAndExecuteErrorV1 {
+                plan_id,
+                TaskStatus::InProgress,
+                None,
+                correlation_id,
+            )
+            .await
+            .map_err(|e| PlanAndExecuteErrorV1 {
                 correlation_id,
                 plan_id: Some(plan_id),
                 error: OrchestratorError {
-                    code: OrchestratorErrorCode::ExecutionFailed,
-                    message: e.to_string(),
+                    code: OrchestratorErrorCode::Internal,
+                    message: e,
                     details: None,
                 },
-            })
+            })?;
+
+        let timeout_duration = if let Some(agents_cfg) = &app_config.agents {
+            let exec_cfg = agents_cfg
+                .llm_router_agent
+                .as_ref()
+                .unwrap_or(&agents_cfg.default);
+            std::time::Duration::from_secs(exec_cfg.timeout_secs)
+        } else {
+            // Legacy default when no agents config is provided.
+            std::time::Duration::from_secs(30)
+        };
+
+        tool_service
+            .execute_llm_router_with_caching(&request, redis_config, timeout_duration)
+            .await
+    } else {
+        // Use standard agent executor for non-LLM agents
+        execute_agent_for_task(
+            target_tool,
+            plan_id,
+            root_task_id,
+            correlation_id,
+            &mut request,
+            memory_service.as_ref(),
+            app_config.as_ref(),
+        )
+        .await
+    };
+
+    let response = exec_result;
+
+    if response.status == "success" {
+        // Mark plan as succeeded.
+        memory_service
+            .record_plan_state_change(
+                plan_id,
+                PlanStatus::Succeeded,
+                Some(&user_message),
+                correlation_id,
+            )
+            .await
+            .map_err(|e| PlanAndExecuteErrorV1 {
+                correlation_id,
+                plan_id: Some(plan_id),
+                error: OrchestratorError {
+                    code: OrchestratorErrorCode::Internal,
+                    message: e,
+                    details: None,
+                },
+            })?;
+        record_counter("orchestrator_plan_succeeded_total", 1);
+
+        // Log action trace (This will now also index the action semantically!)
+        if let Err(e) = memory_service.log_action_trace(&request, &response).await {
+            eprintln!("Failed to log action trace: {}", e);
         }
+
+        let user_facing_output = serde_json::to_string(&response.result).unwrap_or_default();
+
+        Ok(PlanAndExecuteOutputV1 {
+            plan_id,
+            root_task_id,
+            user_facing_output,
+        })
+    } else {
+        // Treat any non-success status as a failed plan.
+        let error_message = if let Some(err) = &response.error {
+            // Prefer structured error message when available.
+            err.message.clone()
+        } else {
+            format!("Execution failed with code {}", response.code)
+        };
+
+        let _ = memory_service
+            .record_plan_state_change(
+                plan_id,
+                PlanStatus::Failed,
+                Some(&format!("Execution failed: {}", error_message)),
+                correlation_id,
+            )
+            .await;
+
+        record_counter("orchestrator_plan_failed_total", 1);
+
+        Err(PlanAndExecuteErrorV1 {
+            correlation_id,
+            plan_id: Some(plan_id),
+            error: OrchestratorError {
+                code: OrchestratorErrorCode::ExecutionFailed,
+                message: error_message,
+                details: None,
+            },
+        })
     }
 }
 

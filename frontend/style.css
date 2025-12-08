@@ -497,3 +497,45 @@ pre {
         height: 52px;
     }
 }
+
+/* Error details styles */
+.error-details-btn {
+    background-color: #333;
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0.25rem;
+    padding: 0.5rem 1rem;
+    font-family: var(--font-rajdhani);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+    margin-top: 0.5rem;
+}
+
+.error-details-btn:hover {
+    background-color: #444;
+    border-color: var(--primary-accent);
+}
+
+.error-details-btn:active {
+    background-color: #222;
+}
+
+.error-details {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background-color: #111;
+    border: 1px solid #333;
+    border-radius: 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: #f87171;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Make sure error details are properly contained */
+.message.agent .content .error-details {
+    max-width: 100%;
+    overflow-x: auto;
+}

@@ -21,3 +21,14 @@
 
 # Log files
 *.log
+
+# Node modules
+node_modules/
+**/node_modules/
+
+# Downloaded dependencies and archives
+*.zip
+redis-*.zip
+
+# Test output files
+test_output.txt

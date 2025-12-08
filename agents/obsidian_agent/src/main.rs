@@ -1,5 +1,5 @@
 use serde_json::Value;
-use shared_types::{ActionRequest, ActionResponse, ActionResult};
+use shared_types::{ActionRequest, ActionResponse, ActionResult, ActionError};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -36,7 +36,12 @@ fn main() {
                 status: "error".to_string(),
                 code: 1,
                 result: None,
-                error: Some(format!("Failed to parse request: {}", e)),
+                error: Some(ActionError {
+                    code: 1,
+                    message: "Failed to parse request".to_string(),
+                    detail: format!("{}", e),
+                    raw_output: Some(buffer.clone()),
+                }),
                 plan_id: None,
                 task_id: None,
                 correlation_id: None,
@@ -77,7 +82,12 @@ fn handle_request(vault_root: &Path, request: ActionRequest) -> ActionResponse {
                     data: "Missing 'vault_path' in parameters".to_string(),
                     metadata: None,
                 }),
-                error: Some("Missing 'vault_path' in parameters".to_string()),
+                error: Some(ActionError {
+                    code: 400,
+                    message: "Missing 'vault_path' in parameters".to_string(),
+                    detail: String::new(),
+                    raw_output: None,
+                }),
                 plan_id: request.plan_id,
                 task_id: request.task_id,
                 correlation_id: request.correlation_id,
@@ -98,7 +108,12 @@ fn handle_request(vault_root: &Path, request: ActionRequest) -> ActionResponse {
                     data: "'vault_path' must be a string".to_string(),
                     metadata: None,
                 }),
-                error: Some("'vault_path' must be a string".to_string()),
+                error: Some(ActionError {
+                    code: 400,
+                    message: "'vault_path' must be a string".to_string(),
+                    detail: String::new(),
+                    raw_output: None,
+                }),
                 plan_id: request.plan_id,
                 task_id: request.task_id,
                 correlation_id: request.correlation_id,
@@ -120,7 +135,12 @@ fn handle_request(vault_root: &Path, request: ActionRequest) -> ActionResponse {
                     data: msg.clone(),
                     metadata: None,
                 }),
-                error: Some(msg),
+                error: Some(ActionError {
+                    code: 400,
+                    message: msg,
+                    detail: String::new(),
+                    raw_output: None,
+                }),
                 plan_id: request.plan_id,
                 task_id: request.task_id,
                 correlation_id: request.correlation_id,
@@ -153,7 +173,12 @@ fn handle_request(vault_root: &Path, request: ActionRequest) -> ActionResponse {
             status: "error".to_string(),
             code: 3,
             result: None,
-            error: Some(e),
+            error: Some(ActionError {
+                code: 3,
+                message: e,
+                detail: String::new(),
+                raw_output: None,
+            }),
             plan_id: request.plan_id,
             task_id: request.task_id,
             correlation_id: request.correlation_id,

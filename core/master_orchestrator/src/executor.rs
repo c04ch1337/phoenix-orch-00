@@ -4,8 +4,8 @@ use once_cell::sync::Lazy;
 use platform::{correlation_span, record_counter, record_histogram};
 use serde_json::{self, json, Value};
 use shared_types::{
-    ActionRequest, ActionResponse, AgentCircuitBreakerConfig, AgentError, AgentErrorCode,
-    AppConfig, CorrelationId, PlanId, TaskId, TaskStatus, ToolError,
+    ActionError, ActionRequest, ActionResponse, AgentCircuitBreakerConfig, AgentError, AgentErrorCode,
+    AppConfig, CorrelationId, PlanId, TaskId, TaskStatus, ToolError, API_VERSION_CURRENT,
 };
 use std::process::Stdio;
 use std::time::Duration;
@@ -14,6 +14,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tokio::time::{sleep, timeout};
+use uuid::Uuid;
 
 fn build_action_response_schema() -> JSONSchema {
     let schema_json = json!({
@@ -75,6 +76,112 @@ fn validate_and_parse_action_response(raw: &str) -> Result<ActionResponse, ToolE
     })
 }
 
+/// Safely parse an ActionResponse from raw JSON, handling any errors gracefully
+/// and returning a properly formatted error response if parsing fails
+fn safe_parse_action_response(stdout: &str, raw_stdout: String) -> Result<ActionResponse, ActionResponse> {
+    safe_parse_action_response_inner(stdout, raw_stdout)
+}
+
+/// Testing export of safe_parse_action_response for unit tests
+/// This is the same function but exposed for testing
+#[cfg(test)]
+pub fn safe_parse_action_response_test_export(stdout: &str, raw_stdout: String) -> Result<ActionResponse, ActionResponse> {
+    safe_parse_action_response_inner(stdout, raw_stdout)
+}
+
+/// Internal implementation of safe_parse_action_response
+fn safe_parse_action_response_inner(stdout: &str, raw_stdout: String) -> Result<ActionResponse, ActionResponse> {
+    // Step 1: Attempt to parse the output as JSON
+    let parse_result: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(stdout);
+    
+    if let Err(json_err) = parse_result {
+        // JSON parsing failed - create an error response
+        let error_response = ActionResponse {
+            // We can't access request ID since parsing failed, use a placeholder
+            request_id: Uuid::new_v4(),
+            api_version: Some(API_VERSION_CURRENT),
+            status: "error".to_string(),
+            code: 400, // Bad Request
+            result: None,
+            error: Some(ActionError {
+                code: 400,
+                message: "Failed to parse agent response as JSON".to_string(),
+                detail: format!("JSON parsing error: {}", json_err),
+                raw_output: Some(raw_stdout),
+            }),
+            plan_id: None,
+            task_id: None,
+            correlation_id: None,
+        };
+        return Err(error_response);
+    }
+    
+    // Step 2: Validate against schema
+    let json_value = parse_result.unwrap();
+    
+    let schema = build_action_response_schema();
+    if let Err(errors) = schema.validate(&json_value) {
+        let details = errors
+            .map(|e| e.to_string())
+            .collect::<Vec<String>>()
+            .join("; ");
+        
+        // Extract request_id if possible, otherwise use placeholder
+        let request_id = json_value.get("request_id")
+            .and_then(|id| id.as_str())
+            .and_then(|id_str| Uuid::parse_str(id_str).ok())
+            .unwrap_or_else(Uuid::new_v4);
+            
+        let error_response = ActionResponse {
+            request_id,
+            api_version: Some(API_VERSION_CURRENT),
+            status: "error".to_string(),
+            code: 400, // Bad Request
+            result: None,
+            error: Some(ActionError {
+                code: 400,
+                message: "Agent response failed schema validation".to_string(),
+                detail: details,
+                raw_output: Some(raw_stdout),
+            }),
+            plan_id: None,
+            task_id: None,
+            correlation_id: None,
+        };
+        return Err(error_response);
+    }
+    
+    // Step 3: Deserialize to ActionResponse
+    match serde_json::from_value::<ActionResponse>(json_value.clone()) {
+        Ok(response) => Ok(response),
+        Err(deser_err) => {
+            // Extract request_id if possible, otherwise use placeholder
+            let request_id = json_value.get("request_id")
+                .and_then(|id| id.as_str())
+                .and_then(|id_str| Uuid::parse_str(id_str).ok())
+                .unwrap_or_else(Uuid::new_v4);
+                
+            let error_response = ActionResponse {
+                request_id,
+                api_version: Some(API_VERSION_CURRENT),
+                status: "error".to_string(),
+                code: 500, // Internal Server Error
+                result: None,
+                error: Some(ActionError {
+                    code: 500,
+                    message: "Failed to deserialize ActionResponse".to_string(),
+                    detail: format!("Deserialization error: {}", deser_err),
+                    raw_output: Some(raw_stdout),
+                }),
+                plan_id: None,
+                task_id: None,
+                correlation_id: None,
+            };
+            Err(error_response)
+        }
+    }
+}
+
 struct AgentRetryPolicy {
     max_attempts: u8,
     initial_backoff_ms: u64,
@@ -91,10 +198,11 @@ fn map_agent_failure_to_agent_error(
     if let Some(r) = resp {
         // Non-success response from agent; interpret code as HTTP-like.
         let code = r.code;
-        let message = r
-            .error
-            .clone()
-            .unwrap_or_else(|| format!("agent {} reported error (code={})", agent_name, code));
+        let message = if let Some(err) = &r.error {
+            err.message.clone()
+        } else {
+            format!("agent {} reported error (code={})", agent_name, code)
+        };
         let agent_code = if (400..500).contains(&code) {
             AgentErrorCode::InvalidRequest
         } else if code == 501 {
@@ -130,11 +238,14 @@ fn map_agent_failure_to_agent_error(
     }
 }
 
+/// Executes an agent process with the given request and timeout.
+/// This is the main entry point for agent execution used by tests.
+#[cfg_attr(test, allow(unused_mut))]
 pub async fn execute_agent(
     agent_name: &str,
     request: &ActionRequest,
     timeout_duration: Duration,
-) -> Result<ActionResponse, ToolError> {
+) -> ActionResponse {
     // Assuming binaries are in target/debug for development
     // In a real scenario, this path would be configurable
     let binary_name = if cfg!(target_os = "windows") {
@@ -143,66 +254,164 @@ pub async fn execute_agent(
         agent_name.to_string()
     };
 
-    let binary_path = std::env::current_dir()
-        .map_err(|e| ToolError::IOError(e.to_string()))?
-        .join("target/debug")
-        .join(&binary_name);
+    // Create a default error response with the request_id
+    // We'll enrich this with more specific information throughout the function
+    let request_id = request.request_id;
+    let mut error_response = ActionResponse {
+        request_id,
+        api_version: request.api_version,
+        status: "error".to_string(),
+        code: 500, // Default to internal server error
+        result: None,
+        error: Some(ActionError {
+            code: 500,
+            message: "Unknown error occurred".to_string(),
+            detail: "No additional details available".to_string(),
+            raw_output: None,
+        }),
+        plan_id: request.plan_id,
+        task_id: request.task_id,
+        correlation_id: request.correlation_id,
+    };
 
-    let request_json = serde_json::to_string(request).map_err(|e| {
-        ToolError::SerializationError(format!("Failed to serialize request: {}", e))
-    })?;
+    // Try to get the current directory
+    let binary_path = match std::env::current_dir() {
+        Ok(path) => path.join("target/debug").join(&binary_name),
+        Err(e) => {
+            error_response.error = Some(ActionError {
+                code: 500,
+                message: "Failed to determine current directory".to_string(),
+                detail: format!("IO error: {}", e),
+                raw_output: None,
+            });
+            return error_response;
+        }
+    };
 
-    let mut child = Command::new(&binary_path)
+    tracing::info!("Executing agent at path: {:?}", binary_path);
+
+    // Try to serialize the request
+    let request_json = match serde_json::to_string(request) {
+        Ok(json) => json,
+        Err(e) => {
+            error_response.error = Some(ActionError {
+                code: 500,
+                message: "Failed to serialize request".to_string(),
+                detail: format!("Serialization error: {}", e),
+                raw_output: None,
+            });
+            return error_response;
+        }
+    };
+
+    // Try to spawn the child process
+    let mut child = match Command::new(&binary_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| {
-            ToolError::IOError(format!(
-                "Failed to spawn agent {} at {:?}: {}",
-                agent_name, binary_path, e
-            ))
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(request_json.as_bytes())
-            .await
-            .map_err(|e| ToolError::IOError(format!("Failed to write to stdin: {}", e)))?;
-    }
-
-    let output_result = timeout(timeout_duration, child.wait_with_output()).await;
-
-    let output = match output_result {
-        Ok(Ok(output)) => output,
-        Ok(Err(e)) => {
-            return Err(ToolError::IOError(format!(
-                "Failed to wait on child: {}",
-                e
-            )))
-        }
-        Err(_) => {
-            return Err(ToolError::Timeout(format!(
-                "Agent {} timed out after {} seconds",
-                agent_name,
-                timeout_duration.as_secs()
-            )))
+    {
+        Ok(child) => child,
+        Err(e) => {
+            error_response.error = Some(ActionError {
+                code: 503, // Service Unavailable
+                message: format!("Failed to spawn agent {}", agent_name),
+                detail: format!("IO error: Failed to spawn agent at {:?}: {}", binary_path, e),
+                raw_output: None,
+            });
+            return error_response;
         }
     };
 
-    if !output.status.success() {
-        return Err(ToolError::ExecutionError(format!(
-            "Agent exited with non-zero status: {:?}",
-            output.status
-        )));
+    // Write to child's stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        // Try to write the request JSON
+        if let Err(e) = stdin.write_all(request_json.as_bytes()).await {
+            error_response.error = Some(ActionError {
+                code: 500,
+                message: "Failed to write request to agent".to_string(),
+                detail: format!("IO error: Failed to write to stdin: {}", e),
+                raw_output: None,
+            });
+            return error_response;
+        }
+
+        // Try to write the newline
+        if let Err(e) = stdin.write_all(b"\n").await {
+            error_response.error = Some(ActionError {
+                code: 500,
+                message: "Failed to complete request to agent".to_string(),
+                detail: format!("IO error: Failed to write newline: {}", e),
+                raw_output: None,
+            });
+            return error_response;
+        }
+
+        // On Windows, drop() is more reliable than shutdown() for signaling EOF to child
+        drop(stdin);
     }
 
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|e| ToolError::InvalidAgentResponse(format!("Invalid UTF-8 from agent: {e}")))?;
+    // Wait for child process with timeout
+    let output_result = timeout(timeout_duration, child.wait_with_output()).await;
 
-    let response = validate_and_parse_action_response(&stdout)?;
+    // Process the output result
+    let output = match output_result {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
+            error_response.error = Some(ActionError {
+                code: 500,
+                message: "Failed to retrieve agent output".to_string(),
+                detail: format!("IO error: Failed to wait on child: {}", e),
+                raw_output: None,
+            });
+            return error_response;
+        }
+        Err(_) => {
+            error_response.error = Some(ActionError {
+                code: 504, // Gateway Timeout
+                message: format!("Agent {} timed out", agent_name),
+                detail: format!("Timeout: Agent {} timed out after {} seconds",
+                    agent_name, timeout_duration.as_secs()),
+                raw_output: None,
+            });
+            return error_response;
+        }
+    };
 
-    Ok(response)
+    // Check if process exited successfully
+    if !output.status.success() {
+        error_response.error = Some(ActionError {
+            code: 500,
+            message: "Agent execution failed".to_string(),
+            detail: format!("Execution error: Agent exited with non-zero status: {:?}",
+                output.status),
+            raw_output: None,
+        });
+        return error_response;
+    }
+
+    // Convert output to UTF-8
+    let stdout = match String::from_utf8(output.stdout) {
+        Ok(stdout) => stdout,
+        Err(e) => {
+            error_response.error = Some(ActionError {
+                code: 400, // Bad Request
+                message: "Agent produced invalid UTF-8 output".to_string(),
+                detail: format!("Invalid UTF-8 from agent: {}", e),
+                raw_output: Some(format!("{:?}", e.into_bytes())),
+            });
+            return error_response;
+        }
+    };
+
+    // Preserve stdout for potential error details
+    let raw_stdout = stdout.clone();
+
+    // Try to parse the JSON response
+    match safe_parse_action_response(&stdout, raw_stdout) {
+        Ok(response) => response,
+        Err(err_response) => err_response,
+    }
 }
 
 async fn execute_agent_with_retries(
@@ -215,9 +424,30 @@ async fn execute_agent_with_retries(
     retry_policy: AgentRetryPolicy,
     timeout_duration: Duration,
     breaker_cfg: &AgentCircuitBreakerConfig,
-) -> Result<ActionResponse, ToolError> {
+) -> ActionResponse {
+    // Create a default error response with the request_id
+    // We'll use this if we encounter memory service errors
+    let error_response = |message: String| -> ActionResponse {
+        ActionResponse {
+            request_id: request.request_id,
+            api_version: request.api_version,
+            status: "error".to_string(),
+            code: 500,
+            result: None,
+            error: Some(ActionError {
+                code: 500,
+                message,
+                detail: "Error occurred in task lifecycle management".to_string(),
+                raw_output: None,
+            }),
+            plan_id: request.plan_id,
+            task_id: request.task_id,
+            correlation_id: request.correlation_id,
+        }
+    };
+
     // Initial lifecycle states for this task.
-    memory_service
+    if let Err(e) = memory_service
         .record_task_state_change(
             task_id,
             plan_id,
@@ -226,13 +456,15 @@ async fn execute_agent_with_retries(
             correlation_id,
         )
         .await
-        .map_err(ToolError::ExecutionError)?;
+    {
+        return error_response(format!("Failed to record task dispatch: {}", e));
+    }
 
     // Metrics: record task start at first dispatch.
     record_counter("orchestrator_task_started_total", 1);
     let task_start = Instant::now();
 
-    memory_service
+    if let Err(e) = memory_service
         .record_task_state_change(
             task_id,
             plan_id,
@@ -241,169 +473,118 @@ async fn execute_agent_with_retries(
             correlation_id,
         )
         .await
-        .map_err(ToolError::ExecutionError)?;
+    {
+        return error_response(format!("Failed to record task in-progress state: {}", e));
+    }
 
     let mut attempt: u8 = 1;
     loop {
         // Global concurrency limit for in-flight agent executions, and per-call
         // latency/failed-call metrics.
-        let result = {
+        let response = {
             let _permit = AGENT_CONCURRENCY
                 .acquire()
                 .await
                 .expect("agent concurrency semaphore closed");
 
             let agent_start = Instant::now();
-            let result = execute_agent(agent_name, request, timeout_duration).await;
+            let response = execute_agent(agent_name, request, timeout_duration).await;
             let duration = agent_start.elapsed().as_secs_f64();
             record_histogram("agent_call_duration_seconds", duration);
-            if result.is_err() {
+            if response.status != "success" {
                 record_counter("agent_call_failures_total", 1);
             }
-            result
+            response
         };
 
-        match result {
-            Ok(resp) => {
-                if resp.status == "success" && resp.code == 0 {
-                    // Mark task as succeeded.
-                    memory_service
-                        .record_task_state_change(
-                            task_id,
-                            plan_id,
-                            TaskStatus::Succeeded,
-                            None,
-                            correlation_id,
-                        )
-                        .await
-                        .map_err(ToolError::ExecutionError)?;
-
-                    // Record total task duration on terminal success.
-                    record_histogram(
-                        "orchestrator_task_duration_seconds",
-                        task_start.elapsed().as_secs_f64(),
-                    );
-
-                    // Update agent health on final success.
-                    let now_iso = chrono::Utc::now().to_rfc3339();
-                    let _ = memory_service
-                        .update_agent_health_on_success(agent_name, &now_iso)
-                        .await;
-
-                    return Ok(resp);
-                }
-
-                // Non-success response from agent.
-                let agent_err = map_agent_failure_to_agent_error(agent_name, Some(&resp), None);
-
-                let should_retry = attempt < retry_policy.max_attempts
-                    && matches!(
-                        agent_err.code,
-                        AgentErrorCode::BackendFailure
-                            | AgentErrorCode::Timeout
-                            | AgentErrorCode::Io
-                            | AgentErrorCode::Internal
-                    );
-
-                if should_retry {
-                    memory_service
-                        .record_task_state_change(
-                            task_id,
-                            plan_id,
-                            TaskStatus::Retried,
-                            Some(agent_err.clone()),
-                            correlation_id,
-                        )
-                        .await
-                        .map_err(ToolError::ExecutionError)?;
-
-                    let backoff_ms = compute_backoff_ms(&retry_policy, attempt);
-                    sleep(Duration::from_millis(backoff_ms)).await;
-                    attempt += 1;
-                    continue;
-                } else {
-                    // Final failure; dead-letter the task.
-                    memory_service
-                        .record_task_state_change(
-                            task_id,
-                            plan_id,
-                            TaskStatus::DeadLettered,
-                            Some(agent_err.clone()),
-                            correlation_id,
-                        )
-                        .await
-                        .map_err(ToolError::ExecutionError)?;
-
-                    // Record total task duration on terminal failure.
-                    record_histogram(
-                        "orchestrator_task_duration_seconds",
-                        task_start.elapsed().as_secs_f64(),
-                    );
-
-                    // Update agent health on final failure.
-                    let now_iso = chrono::Utc::now().to_rfc3339();
-                    let _ = memory_service
-                        .update_agent_health_on_failure(agent_name, &now_iso, breaker_cfg)
-                        .await;
-
-                    return Ok(resp);
-                }
+        if response.status == "success" && response.code == 0 {
+            // Mark task as succeeded.
+            if let Err(e) = memory_service
+                .record_task_state_change(
+                    task_id,
+                    plan_id,
+                    TaskStatus::Succeeded,
+                    None,
+                    correlation_id,
+                )
+                .await
+            {
+                return error_response(format!("Failed to record task success: {}", e));
             }
-            Err(e) => {
-                let agent_err = map_agent_failure_to_agent_error(agent_name, None, Some(&e));
 
-                let should_retry = attempt < retry_policy.max_attempts
-                    && matches!(
-                        agent_err.code,
-                        AgentErrorCode::BackendFailure
-                            | AgentErrorCode::Timeout
-                            | AgentErrorCode::Io
-                            | AgentErrorCode::Internal
-                    );
+            // Record total task duration on terminal success.
+            record_histogram(
+                "orchestrator_task_duration_seconds",
+                task_start.elapsed().as_secs_f64(),
+            );
 
-                if should_retry {
-                    memory_service
-                        .record_task_state_change(
-                            task_id,
-                            plan_id,
-                            TaskStatus::Retried,
-                            Some(agent_err.clone()),
-                            correlation_id,
-                        )
-                        .await
-                        .map_err(ToolError::ExecutionError)?;
+            // Update agent health on final success.
+            let now_iso = chrono::Utc::now().to_rfc3339();
+            let _ = memory_service
+                .update_agent_health_on_success(agent_name, &now_iso)
+                .await;
 
-                    let backoff_ms = compute_backoff_ms(&retry_policy, attempt);
-                    sleep(Duration::from_millis(backoff_ms)).await;
-                    attempt += 1;
-                    continue;
-                } else {
-                    // Final failure; dead-letter the task and return error.
-                    let _ = memory_service
-                        .record_task_state_change(
-                            task_id,
-                            plan_id,
-                            TaskStatus::DeadLettered,
-                            Some(agent_err),
-                            correlation_id,
-                        )
-                        .await;
+            return response;
+        }
 
-                    // Record total task duration on terminal failure.
-                    record_histogram(
-                        "orchestrator_task_duration_seconds",
-                        task_start.elapsed().as_secs_f64(),
-                    );
+        // Non-success response from agent.
+        let agent_err = map_agent_failure_to_agent_error(agent_name, Some(&response), None);
 
-                    // Update agent health on final failure.
-                    let now_iso = chrono::Utc::now().to_rfc3339();
-                    let _ = memory_service
-                        .update_agent_health_on_failure(agent_name, &now_iso, breaker_cfg)
-                        .await;
+        let should_retry = attempt < retry_policy.max_attempts
+            && matches!(
+                agent_err.code,
+                AgentErrorCode::BackendFailure
+                    | AgentErrorCode::Timeout
+                    | AgentErrorCode::Io
+                    | AgentErrorCode::Internal
+            );
 
-                    return Err(e);
-                }
+        if should_retry {
+            if let Err(e) = memory_service
+                .record_task_state_change(
+                    task_id,
+                    plan_id,
+                    TaskStatus::Retried,
+                    Some(agent_err.clone()),
+                    correlation_id,
+                )
+                .await
+            {
+                return error_response(format!("Failed to record task retry: {}", e));
             }
+
+            let backoff_ms = compute_backoff_ms(&retry_policy, attempt);
+            sleep(Duration::from_millis(backoff_ms)).await;
+            attempt += 1;
+            continue;
+        } else {
+            // Final failure; dead-letter the task.
+            if let Err(e) = memory_service
+                .record_task_state_change(
+                    task_id,
+                    plan_id,
+                    TaskStatus::DeadLettered,
+                    Some(agent_err.clone()),
+                    correlation_id,
+                )
+                .await
+            {
+                return error_response(format!("Failed to record task dead-letter: {}", e));
+            }
+
+            // Record total task duration on terminal failure.
+            record_histogram(
+                "orchestrator_task_duration_seconds",
+                task_start.elapsed().as_secs_f64(),
+            );
+
+            // Update agent health on final failure.
+            let now_iso = chrono::Utc::now().to_rfc3339();
+            let _ = memory_service
+                .update_agent_health_on_failure(agent_name, &now_iso, breaker_cfg)
+                .await;
+
+            return response;
         }
     }
 }
@@ -433,7 +614,7 @@ pub async fn execute_agent_for_task(
     request: &mut ActionRequest,
     memory_service: &MemoryService,
     app_config: &AppConfig,
-) -> Result<ActionResponse, ToolError> {
+) -> ActionResponse {
     let span = correlation_span(correlation_id, "execute_agent_for_task");
     let _enter = span.enter();
     tracing::info!(
@@ -539,7 +720,12 @@ mod tests {
                 data: "".to_string(),
                 metadata: None,
             }),
-            error: Some(format!("error-{code}")),
+            error: Some(ActionError {
+                code,
+                message: format!("error-{code}"),
+                detail: String::new(),
+                raw_output: None,
+            }),
             plan_id: None,
             task_id: None,
             correlation_id: None,
@@ -598,5 +784,72 @@ mod tests {
         let exec_err = ToolError::ExecutionError("exec".to_string());
         let derr4 = map_agent_failure_to_agent_error("test_agent", None, Some(&exec_err));
         assert!(matches!(derr4.code, AgentErrorCode::BackendFailure));
+    }
+    
+    #[tokio::test]
+    async fn test_safe_parse_action_response_valid_json() {
+        // Valid action response JSON
+        let valid_json = r#"{
+            "request_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            "api_version": "v1",
+            "status": "success",
+            "code": 0,
+            "result": {
+                "output_type": "text",
+                "data": "Sample data"
+            }
+        }"#;
+        
+        let result = safe_parse_action_response(valid_json, valid_json.to_string());
+        assert!(result.is_ok());
+        
+        let response = result.unwrap();
+        assert_eq!(response.status, "success");
+        assert_eq!(response.code, 0);
+        assert!(response.result.is_some());
+    }
+    
+    #[tokio::test]
+    async fn test_safe_parse_action_response_invalid_json() {
+        // Malformed JSON
+        let invalid_json = r#"{
+            "request_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            "status": "success"
+            "code": 0
+        }"#;  // Missing commas
+        
+        let result = safe_parse_action_response(invalid_json, invalid_json.to_string());
+        assert!(result.is_err());
+        
+        let error_response = result.unwrap_err();
+        assert_eq!(error_response.status, "error");
+        assert_eq!(error_response.code, 400);
+        assert!(error_response.error.is_some());
+        
+        let error = error_response.error.as_ref().unwrap();
+        assert_eq!(error.code, 400);
+        assert!(error.message.contains("Failed to parse"));
+        assert!(error.raw_output.is_some());
+    }
+    
+    #[tokio::test]
+    async fn test_safe_parse_action_response_schema_validation_failure() {
+        // JSON that doesn't match our schema (missing required fields)
+        let invalid_schema_json = r#"{
+            "request_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            "status": "success"
+        }"#;  // Missing required "code" field
+        
+        let result = safe_parse_action_response(invalid_schema_json, invalid_schema_json.to_string());
+        assert!(result.is_err());
+        
+        let error_response = result.unwrap_err();
+        assert_eq!(error_response.status, "error");
+        assert!(error_response.error.is_some());
+        
+        let error = error_response.error.as_ref().unwrap();
+        assert!(error.message.contains("schema validation"));
+        assert!(error.detail.contains("code"));  // Should mention the missing field
+        assert!(error.raw_output.is_some());
     }
 }

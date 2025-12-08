@@ -1,0 +1,96 @@
+{
+    "testCases": [
+        {
+            "id": "case1",
+            "name": "JSON Parsing Error",
+            "description": "Malformed JSON that can't be parsed properly",
+            "response": {
+                "status": "error",
+                "output": "{ \"data\": \"this is broken JSON with missing closings",
+                "error": null
+            }
+        },
+        {
+            "id": "case2",
+            "name": "Process Execution Error",
+            "description": "Agent process crashed or timed out",
+            "response": {
+                "status": "error",
+                "code": 500,
+                "output": null,
+                "error": {
+                    "code": 500,
+                    "message": "Agent execution failed",
+                    "detail": "Process exited with non-zero status code 1. The command may not exist or might have crashed during execution.",
+                    "raw_output": "Error: Command not found\nStack trace:\n  at Process.ChildProcess._handle.onexit (internal/child_process.js:290:12)"
+                }
+            }
+        },
+        {
+            "id": "case3",
+            "name": "ActionError with Details",
+            "description": "Well-structured error with message and technical details",
+            "response": {
+                "status": "error",
+                "code": 400,
+                "output": null,
+                "error": {
+                    "code": 400,
+                    "message": "Failed to process the command due to invalid syntax",
+                    "detail": "The command 'git pull' failed because the repository is not initialized. Try running 'git init' first or check if you're in the correct directory."
+                }
+            }
+        },
+        {
+            "id": "case4",
+            "name": "Legacy Error String",
+            "description": "Old error format with just a string message",
+            "response": {
+                "status": "error",
+                "output": "Error: Operation failed due to an unexpected condition",
+                "error": null
+            }
+        },
+        {
+            "id": "case5",
+            "name": "Empty Error Response",
+            "description": "Error without any useful information",
+            "response": {
+                "status": "error",
+                "output": "",
+                "error": null
+            }
+        },
+        {
+            "id": "case6",
+            "name": "Nested JSON Error with Context",
+            "description": "Error with additional contextual information",
+            "response": {
+                "status": "error",
+                "code": 422,
+                "output": null,
+                "error": {
+                    "code": 422,
+                    "message": "Command validation failed",
+                    "detail": "The provided command parameters don't match the expected format",
+                    "context": {
+                        "received": {
+                            "format": "jpg",
+                            "size": "large"
+                        },
+                        "expected": {
+                            "format": [
+                                "png",
+                                "webp"
+                            ],
+                            "size": [
+                                "small",
+                                "medium"
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; connect-src 'self' http://127.0.0.1:8282 http://localhost:8282; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; img-src 'self' data: https://grainy-gradients.vercel.app;">
+    <title>Phoenix Orch - Error Test Harness</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Code&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="style.css?v=3">
+    <style>
+        .test-controls {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #1a1a1a;
+            padding: 15px;
+            z-index: 100;
+            border-bottom: 2px solid #333;
+        }
+
+        .test-controls h2 {
+            margin: 0 0 10px 0;
+            color: #ff6b00;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 18px;
+        }
+
+        .test-controls select {
+            background: #2a2a2a;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 8px;
+            border-radius: 4px;
+            margin-right: 10px;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .test-controls button {
+            background: #ff6b00;
+            color: #000;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: 'Inter', sans-serif;
+            transition: background 0.2s;
+        }
+
+        .test-controls button:hover {
+            background: #ff8c00;
+        }
+
+        .test-controls .description {
+            margin: 10px 0 0 0;
+            font-size: 14px;
+            color: #ccc;
+            font-family: 'Inter', sans-serif;
+            max-width: 800px;
+        }
+
+        .test-controls .json-preview {
+            margin-top: 10px;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Fira Code', monospace;
+            font-size: 12px;
+            color: #ddd;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        /* Add margin-top to the app container to accommodate the test controls */
+        #app-container {
+            margin-top: 140px;
+            border-top: none;
+        }
+
+        #chat-container {
+            max-height: calc(100vh - 315px);
+        }
+
+        #splash-screen {
+            display: none;
+            visibility: hidden;
+        }
+
+        .message.error-test {
+            border: 1px dashed #ff6b00;
+            position: relative;
+        }
+
+        .message.error-test::before {
+            content: "Test Error";
+            position: absolute;
+            top: -12px;
+            left: 10px;
+            background: #ff6b00;
+            color: black;
+            padding: 2px 8px;
+            font-size: 10px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="test-controls">
+        <h2>ERROR RENDERING TEST HARNESS</h2>
+        <select id="test-case-select">
+            <option value="">Select a test case...</option>
+            <!-- Test case options will be populated here -->
+        </select>
+        <button id="run-test">Run Test</button>
+        <button id="clear-chat">Clear Chat</button>
+        <div class="description" id="test-description">Select a test case to view its description...</div>
+        <pre class="json-preview" id="json-preview">Select a test case to preview the response JSON...</pre>
+    </div>
+
+    <!-- Main App -->
+    <div id="app-container">
+        <header>
+            <h1>
+                <div class="status-dot state-idle" aria-hidden="true"></div>
+                <span>PHOENIX <span class="text-accent">ORCH</span> - ERROR TEST</span>
+            </h1>
+        </header>
+
+        <div id="chat-container" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation log">
+            <!-- Messages will appear here -->
+            <div class="message agent">
+                <span class="role">System</span>
+                <div class="content">Error Test Harness Active. Select a test case and click "Run Test" to simulate
+                    different error conditions.</div>
+            </div>
+        </div>
+
+        <div id="input-area">
+            <label class="visually-hidden" for="message-input">Type a command or message to send to the
+                orchestrator</label>
+            <textarea id="message-input"
+                placeholder="Your message will be ignored - use the test controls above"></textarea>
+            <button id="send-btn" type="button" aria-label="Send message">Send</button>
+        </div>
+    </div> <!-- End App Container -->
+
+    <!-- Hidden but needed for compatibility with script.js -->
+    <div id="splash-screen" role="dialog" aria-modal="true" aria-labelledby="splash-title"
+        aria-describedby="splash-subtitle">
+        <div class="splash-content">
+            <h1 id="splash-title" class="splash-title">PHOENIX <span class="text-accent">ORCH</span></h1>
+            <p id="splash-subtitle" class="splash-subtitle">THE ASHEN GUARD EDITION</p>
+            <button id="ignite-btn" type="button">
+                <span class="btn-text">IGNITE SYSTEM</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Load original script first, then our test script -->
+    <script src="script.js"></script>
+    <script>
+        // Disable the normal send functionality
+        document.getElementById('send-btn').removeEventListener('click', handleSend);
+        document.getElementById('message-input').removeEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+            }
+        });
+
+        // Test Harness Functionality
+        let testCases = [];
+        let selectedTestCase = null;
+
+        // Define test cases directly in the script to avoid CORS issues
+        function loadTestCases() {
+            // Define test cases inline
+            testCases = [
+                {
+                    "id": "case1",
+                    "name": "JSON Parsing Error",
+                    "description": "Malformed JSON that can't be parsed properly",
+                    "response": {
+                        "status": "error",
+                        "output": "{ \"data\": \"this is broken JSON with missing closings",
+                        "error": null
+                    }
+                },
+                {
+                    "id": "case2",
+                    "name": "Process Execution Error",
+                    "description": "Agent process crashed or timed out",
+                    "response": {
+                        "status": "error",
+                        "code": 500,
+                        "output": null,
+                        "error": {
+                            "code": 500,
+                            "message": "Agent execution failed",
+                            "detail": "Process exited with non-zero status code 1. The command may not exist or might have crashed during execution.",
+                            "raw_output": "Error: Command not found\nStack trace:\n  at Process.ChildProcess._handle.onexit (internal/child_process.js:290:12)"
+                        }
+                    }
+                },
+                {
+                    "id": "case3",
+                    "name": "ActionError with Details",
+                    "description": "Well-structured error with message and technical details",
+                    "response": {
+                        "status": "error",
+                        "code": 400,
+                        "output": null,
+                        "error": {
+                            "code": 400,
+                            "message": "Failed to process the command due to invalid syntax",
+                            "detail": "The command 'git pull' failed because the repository is not initialized. Try running 'git init' first or check if you're in the correct directory."
+                        }
+                    }
+                },
+                {
+                    "id": "case4",
+                    "name": "Legacy Error String",
+                    "description": "Old error format with just a string message",
+                    "response": {
+                        "status": "error",
+                        "output": "Error: Operation failed due to an unexpected condition",
+                        "error": null
+                    }
+                },
+                {
+                    "id": "case5",
+                    "name": "Empty Error Response",
+                    "description": "Error without any useful information",
+                    "response": {
+                        "status": "error",
+                        "output": "",
+                        "error": null
+                    }
+                },
+                {
+                    "id": "case6",
+                    "name": "Nested JSON Error with Context",
+                    "description": "Error with additional contextual information",
+                    "response": {
+                        "status": "error",
+                        "code": 422,
+                        "output": null,
+                        "error": {
+                            "code": 422,
+                            "message": "Command validation failed",
+                            "detail": "The provided command parameters don't match the expected format",
+                            "context": {
+                                "received": { "format": "jpg", "size": "large" },
+                                "expected": { "format": ["png", "webp"], "size": ["small", "medium"] }
+                            }
+                        }
+                    }
+                }
+            ];
+
+            const selectElement = document.getElementById('test-case-select');
+
+            // Add options to the select
+            testCases.forEach(testCase => {
+                const option = document.createElement('option');
+                option.value = testCase.id;
+                option.textContent = testCase.name;
+                selectElement.appendChild(option);
+            });
+
+            // Handle selection change
+            selectElement.addEventListener('change', () => {
+                const selectedId = selectElement.value;
+                selectedTestCase = testCases.find(tc => tc.id === selectedId) || null;
+                updatePreview();
+            });
+
+            console.log('Loaded test cases:', testCases);
+        }
+
+        function updatePreview() {
+            const descriptionElement = document.getElementById('test-description');
+            const jsonPreviewElement = document.getElementById('json-preview');
+
+            if (selectedTestCase) {
+                descriptionElement.textContent = selectedTestCase.description;
+                jsonPreviewElement.textContent = JSON.stringify(selectedTestCase.response, null, 2);
+            } else {
+                descriptionElement.textContent = 'Select a test case to view its description...';
+                jsonPreviewElement.textContent = 'Select a test case to preview the response JSON...';
+            }
+        }
+
+        // Run the selected test
+        async function runTest() {
+            if (!selectedTestCase) {
+                alert('Please select a test case first');
+                return;
+            }
+
+            // Display a user message for context
+            appendMessage('User', `Running error test: ${selectedTestCase.name}`, 'user');
+
+            // Add Loading Indicator
+            const loadingId = appendMessage('System', 'Simulating API response...', 'agent', true);
+
+            // Short delay to simulate network request
+            await new Promise(resolve => setTimeout(resolve, 800));
+
+            // Remove loading message
+            removeMessage(loadingId);
+
+            // Process the mock response using the real handleSend logic
+            const response = selectedTestCase.response;
+
+            try {
+                if (response.status === 'success') {
+                    let output = response.output;
+                    try {
+                        const parsed = JSON.parse(output);
+                        if (parsed && typeof parsed === 'object' && parsed.data) {
+                            output = parsed.data;
+                        }
+                    } catch {
+                        // Not JSON, use as-is
+                    }
+                    appendMessage('Agent', output || '', 'agent error-test');
+
+                    if (response.correlation_id) {
+                        console.info('correlation_id:', response.correlation_id);
+                    }
+
+                    setAppState(State.Idle);
+                } else {
+                    // Handle structured error objects from ActionError
+                    if (response.error && typeof response.error === 'object') {
+                        let errorObj = response.error;
+
+                        // Handle both ActionError from agents and OrchestratorError from API
+                        const errorMessage = errorObj.message || 'An error occurred';
+                        const errorDetail = errorObj.detail ||
+                            (errorObj.details ? JSON.stringify(errorObj.details, null, 2) : null) ||
+                            'No additional details available';
+
+                        // Show error with expandable technical details
+                        appendMessage('Error', errorMessage, 'agent error-test', false, true, errorDetail);
+                    } else {
+                        // Fallback to previous behavior for backward compatibility
+                        appendMessage('Error', response.output || 'Unknown error', 'agent error-test');
+                    }
+                    setAppState(State.Error);
+                }
+            } catch (error) {
+                console.error('Error processing response:', error);
+                appendMessage('Error', 'Test harness error: ' + error.message, 'agent error-test');
+                setAppState(State.Error);
+            }
+        }
+
+        function clearChat() {
+            const chatContainer = document.getElementById('chat-container');
+            // Remove all but the first message (system intro)
+            while (chatContainer.childNodes.length > 1) {
+                chatContainer.removeChild(chatContainer.lastChild);
+            }
+            setAppState(State.Idle);
+        }
+
+        // Initialize the test harness
+        document.addEventListener('DOMContentLoaded', () => {
+            // Make app visible
+            document.getElementById('app-container').classList.remove('hidden');
+            document.getElementById('app-container').removeAttribute('inert');
+
+            // Load test cases
+            loadTestCases();
+
+            // Set up button handlers
+            document.getElementById('run-test').addEventListener('click', runTest);
+            document.getElementById('clear-chat').addEventListener('click', clearChat);
+        });
+    </script>
+</body>
+
+</html>

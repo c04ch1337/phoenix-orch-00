@@ -69,6 +69,23 @@ pub struct ActionResult {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// Structured error response for agent invocations.
+/// Used to provide detailed error information and assist in error handling and diagnosis.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ActionError {
+    /// Error code for categorization (non-zero)
+    pub code: u16,
+    
+    /// Short user-friendly error summary
+    pub message: String,
+    
+    /// Full diagnostic message with detailed error information
+    pub detail: String,
+    
+    /// The raw, unparsed STDOUT from the agent (if available)
+    pub raw_output: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActionResponse {
     /// Echo of the request_id provided in ActionRequest.
@@ -87,8 +104,9 @@ pub struct ActionResponse {
     /// Result payload when status == "success".
     pub result: Option<ActionResult>,
 
-    /// Human-readable error message when status != "success".
-    pub error: Option<String>,
+    /// Structured error information when status != "success".
+    /// Replaces the previous string-only error field with a more comprehensive structure.
+    pub error: Option<ActionError>,
 
     /// Optional plan this response belongs to.
     #[serde(default)]
@@ -151,11 +169,40 @@ pub struct AgentsConfig {
     pub llm_router_agent: Option<AgentExecutionConfig>,
 }
 
+/// Redis cache configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RedisConfig {
+    /// Redis server URL (e.g., "redis://127.0.0.1:6379")
+    pub url: String,
+    /// Redis connection pool size
+    pub pool_size: u32,
+    /// Default TTL for cache entries in seconds
+    pub ttl_seconds: u64,
+    /// Connection timeout in milliseconds
+    #[serde(default)]
+    pub connection_timeout_ms: Option<u64>,
+    /// Maximum retry attempts for Redis operations
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+    /// Delay between retry attempts in milliseconds
+    #[serde(default)]
+    pub retry_delay_ms: Option<u64>,
+    /// Read timeout in milliseconds
+    #[serde(default)]
+    pub read_timeout_ms: Option<u64>,
+    /// Write timeout in milliseconds
+    #[serde(default)]
+    pub write_timeout_ms: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppConfig {
     pub llm: LLMConfig,
     #[serde(default)]
     pub agents: Option<AgentsConfig>,
+    /// Redis caching configuration, if enabled
+    #[serde(default)]
+    pub redis: Option<RedisConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -473,3 +520,54 @@ mod tests {
         );
     }
 }
+
+    #[test]
+    fn action_error_serialization() {
+        let error = ActionError {
+            code: 500,
+            message: "Processing failed".to_string(),
+            detail: "The agent encountered an unexpected error while processing the request".to_string(),
+            raw_output: Some("Error: Cannot parse response at line 42".to_string()),
+        };
+
+        let json = serde_json::to_string(&error).expect("serialization should succeed");
+        let decoded: ActionError = serde_json::from_str(&json).expect("deserialization should succeed");
+
+        assert_eq!(decoded.code, error.code);
+        assert_eq!(decoded.message, error.message);
+        assert_eq!(decoded.detail, error.detail);
+        assert_eq!(decoded.raw_output, error.raw_output);
+    }
+
+    #[test]
+    fn action_response_with_error() {
+        let original = ActionResponse {
+            request_id: Uuid::new_v4(),
+            api_version: Some(ApiVersion::V1),
+            status: "error".to_string(),
+            code: 500,
+            result: None,
+            error: Some(ActionError {
+                code: 500,
+                message: "JSON parsing failed".to_string(),
+                detail: "Malformed JSON received from agent".to_string(),
+                raw_output: Some("Invalid JSON: unexpected token at line 3".to_string()),
+            }),
+            plan_id: Some(Uuid::new_v4()),
+            task_id: Some(Uuid::new_v4()),
+            correlation_id: Some(Uuid::new_v4()),
+        };
+
+        let json = serde_json::to_string(&original).expect("serialization should succeed");
+        let decoded: ActionResponse = serde_json::from_str(&json).expect("deserialization should succeed");
+
+        assert_eq!(decoded.status, original.status);
+        assert_eq!(decoded.code, original.code);
+        assert!(decoded.error.is_some());
+        let error = decoded.error.as_ref().unwrap();
+        let original_error = original.error.as_ref().unwrap();
+        assert_eq!(error.code, original_error.code);
+        assert_eq!(error.message, original_error.message);
+        assert_eq!(error.detail, original_error.detail);
+        assert_eq!(error.raw_output, original_error.raw_output);
+    }

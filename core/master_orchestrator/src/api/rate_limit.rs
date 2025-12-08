@@ -29,7 +29,8 @@ impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
             // Default: 100 requests per minute
-            requests: NonZeroU32::new(100).unwrap(),
+            // Use 100 or fallback to 60 in the impossible case where 100 isn't valid
+            requests: NonZeroU32::new(100).unwrap_or(NonZeroU32::new(60).unwrap()),
             window_secs: 60,
         }
     }
@@ -54,9 +55,20 @@ impl RateLimiterState {
         if let Some(limiter) = self.limiters.get(user_id) {
             limiter.clone()
         } else {
-            let quota = Quota::with_period(Duration::from_secs(self.config.window_secs))
-                .unwrap()
-                .allow_burst(self.config.requests);
+            // Create a new rate limiter for this user
+            // The value must be positive, so this unwrap is safe since window_secs should be > 0
+            // However, let's handle potential errors gracefully
+            // Attempt to create a quota with the configured period
+            let quota = match Quota::with_period(Duration::from_secs(self.config.window_secs)) {
+                Some(q) => q.allow_burst(self.config.requests),
+                None => {
+                    // Fallback to a reasonable default if the period is invalid
+                    tracing::warn!("Invalid rate limit period: {}s, using default of 60s",
+                                   self.config.window_secs);
+                    Quota::per_minute(self.config.requests)
+                }
+            };
+            
             let limiter = Arc::new(RateLimiter::direct(quota));
             self.limiters.insert(user_id.to_string(), limiter.clone());
             limiter
@@ -122,11 +134,19 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         // Extract user ID from JWT claims if available
-        let user_id = req
-            .extensions()
-            .get::<super::auth::Claims>()
-            .map(|claims| claims.sub.clone())
-            .unwrap_or_else(|| "anonymous".to_string());
+        // Extract user ID from JWT claims if available, or use "anonymous" for unauthenticated requests
+        let user_id = match req.extensions().get::<super::auth::Claims>() {
+            Some(claims) => {
+                let id = claims.sub.clone();
+                tracing::debug!("Rate limiting for authenticated user: {}", id);
+                id
+            },
+            None => {
+                // Log at debug level when processing unauthenticated requests
+                tracing::debug!("Rate limiting for unauthenticated request, using default anonymous bucket");
+                "anonymous".to_string()
+            }
+        };
 
         let limiter = self.state.get_limiter(&user_id);
 

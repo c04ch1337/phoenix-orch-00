@@ -13,11 +13,15 @@ pub fn load_single_config(path: &str) -> Result<AppConfig, String> {
         fs::read_to_string(path).map_err(|e| format!("Failed to read config file: {}", e))?;
 
     // Regex to find {{VAR_NAME}} or ${VAR_NAME}
-    let re = Regex::new(r"(\{\{|\$\{)([a-zA-Z0-9_]+)(\}\}|\})")
+    // Use alternation to ensure proper brace matching:
+    // - \$\{([a-zA-Z0-9_]+)\} matches ${VAR} with single braces
+    // - \{\{([a-zA-Z0-9_]+)\}\} matches {{VAR}} with double braces
+    let re = Regex::new(r"\$\{([a-zA-Z0-9_]+)\}|\{\{([a-zA-Z0-9_]+)\}\}")
         .map_err(|e| format!("Failed to create regex: {}", e))?;
 
     let processed_content = re.replace_all(&content, |caps: &regex::Captures| {
-        let var_name = &caps[2];
+        // Group 1 is for ${VAR} syntax, Group 2 is for {{VAR}} syntax
+        let var_name = caps.get(1).or_else(|| caps.get(2)).map(|m| m.as_str()).unwrap_or("");
         env::var(var_name).unwrap_or_else(|_| format!("{{{{{{{}}}}}}}", var_name))
     });
 
@@ -79,9 +83,20 @@ pub fn merge_app_config(base: AppConfig, overlay: AppConfig) -> AppConfig {
         (None, None) => None,
     };
 
+    // Merge Redis config
+    let merged_redis = match (base.redis, overlay.redis) {
+        (Some(base_redis), Some(overlay_redis)) => {
+            Some(merge_redis_config(base_redis, overlay_redis))
+        }
+        (None, Some(overlay_redis)) => Some(overlay_redis),
+        (Some(base_redis), None) => Some(base_redis),
+        (None, None) => None,
+    };
+
     AppConfig {
         llm: merged_llm,
         agents: merged_agents,
+        redis: merged_redis,
     }
 }
 
@@ -145,6 +160,25 @@ fn merge_agent_execution_config(
                 base.circuit_breaker.cooldown_ms
             },
         },
+    }
+}
+
+fn merge_redis_config(
+    base: shared_types::RedisConfig,
+    overlay: shared_types::RedisConfig
+) -> shared_types::RedisConfig {
+    shared_types::RedisConfig {
+        // URL and pool_size are required fields, prefer overlay when available
+        url: if !overlay.url.is_empty() { overlay.url } else { base.url },
+        pool_size: if overlay.pool_size > 0 { overlay.pool_size } else { base.pool_size },
+        ttl_seconds: if overlay.ttl_seconds > 0 { overlay.ttl_seconds } else { base.ttl_seconds },
+        
+        // For optional fields, prefer overlay when set
+        connection_timeout_ms: overlay.connection_timeout_ms.or(base.connection_timeout_ms),
+        max_retries: overlay.max_retries.or(base.max_retries),
+        retry_delay_ms: overlay.retry_delay_ms.or(base.retry_delay_ms),
+        read_timeout_ms: overlay.read_timeout_ms.or(base.read_timeout_ms),
+        write_timeout_ms: overlay.write_timeout_ms.or(base.write_timeout_ms),
     }
 }
 
@@ -217,6 +251,7 @@ mod tests {
                 obsidian_agent: None,
                 llm_router_agent: None,
             }),
+            redis: None,
         }
     }
 

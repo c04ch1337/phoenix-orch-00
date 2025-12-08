@@ -2,8 +2,17 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde_json::json;
 use shared_types::{ActionRequest, ActionResponse, ActionResult};
-use std::io::{self, Read};
+use std::fs::OpenOptions;
+use std::io::{self, BufRead, Write};
 use std::time::Duration;
+
+fn log_to_file(msg: &str) {
+    let _ = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("agent_debug.log")
+        .and_then(|mut file| writeln!(file, "{}", msg));
+}
 
 static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     Client::builder()
@@ -15,12 +24,30 @@ static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
 #[tokio::main]
 async fn main() {
     platform::init_tracing("llm_router_agent").expect("failed to init tracing");
-    // 1. Read JSON ActionRequest from STDIN
+    // 1. Read JSON ActionRequest from STDIN (single line)
+    log_to_file("Agent started. Reading stdin line...");
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
     let mut buffer = String::new();
-    if let Err(e) = io::stdin().read_to_string(&mut buffer) {
-        eprintln!("Failed to read from stdin: {}", e);
-        return;
+    
+    match reader.read_line(&mut buffer) {
+        Ok(0) => {
+            log_to_file("EOF received with no data");
+            eprintln!("EOF received with no data");
+            return;
+        }
+        Ok(_) => {
+            log_to_file(&format!("Received {} bytes", buffer.len()));
+        }
+        Err(e) => {
+            log_to_file(&format!("Failed to read from stdin: {}", e));
+            eprintln!("Failed to read from stdin: {}", e);
+            return;
+        }
     }
+    eprintln!("[LLM Agent] Received request of size: {}", buffer.len());
+    log_to_file(&format!("Received request of size: {}", buffer.len()));
+    eprintln!("[LLM Agent] Received request of size: {}", buffer.len());
 
     let request: ActionRequest = match serde_json::from_str(&buffer) {
         Ok(req) => req,
@@ -45,6 +72,9 @@ async fn main() {
             .get("model_name")
             .and_then(|v| v.as_str())
             .unwrap_or("google/gemini-2.0-flash-exp:free");
+
+        log_to_file(&format!("Calling provider: {}, model: {}", base_url, model_name));
+        eprintln!("[LLM Agent] Calling provider: {}, model: {}", base_url, model_name);
 
         match call_llm_provider(base_url, api_key, model_name, prompt).await {
             Ok(response_text) => ActionResult {
@@ -126,6 +156,8 @@ async fn call_llm_provider(
     if !res.status().is_success() {
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
+        log_to_file(&format!("API Error: Status={}, Body={}", status, text));
+        eprintln!("[LLM Agent] API Error: Status={}, Body={}", status, text);
         return Err(format!("API Error {}: {}", status, text));
     }
 

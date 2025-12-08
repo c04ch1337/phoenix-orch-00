@@ -35,3 +35,8 @@ max_backoff_ms = 8000
 [agents.llm_router_agent.circuit_breaker]
 failure_threshold = 5
 cooldown_ms = 30000
+
+[redis]
+url = "redis://127.0.0.1:6379"
+pool_size = 15  # Higher pool size for development environment
+ttl_seconds = 1800  # 30 minutes cache TTL for development

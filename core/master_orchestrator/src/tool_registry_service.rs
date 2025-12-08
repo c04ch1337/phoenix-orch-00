@@ -20,8 +20,13 @@ pub fn initialize_database(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 pub fn register_tool(conn: &Connection, tool: &Tool) -> rusqlite::Result<()> {
-    let actions_schema_json =
-        serde_json::to_string(&tool.actions_schema).unwrap_or_else(|_| "{}".to_string());
+    let actions_schema_json = match serde_json::to_string(&tool.actions_schema) {
+        Ok(json) => json,
+        Err(err) => {
+            tracing::warn!("Failed to serialize actions schema for tool {}: {}", tool.name, err);
+            "{}".to_string()
+        }
+    };
 
     conn.execute(
         "INSERT OR REPLACE INTO tool_registry (name, version, description, executable_path, actions_schema, tags, category, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -43,7 +48,16 @@ pub fn load_tools(conn: &rusqlite::Connection) -> Result<Vec<Tool>, rusqlite::Er
     let mut stmt = conn.prepare("SELECT name, version, description, executable_path, actions_schema, tags, category, enabled FROM tool_registry")?;
     let tool_iter = stmt.query_map([], |row| {
         let actions_schema_str: String = row.get(4)?;
-        let actions_schema = serde_json::from_str(&actions_schema_str).unwrap_or_default();
+        let name: String = row.get(0)?;
+        
+        // Parse the actions schema JSON with proper error handling
+        let actions_schema = match serde_json::from_str(&actions_schema_str) {
+            Ok(schema) => schema,
+            Err(err) => {
+                tracing::error!("Failed to parse actions schema for tool {}: {}", name, err);
+                Default::default()
+            }
+        };
 
         Ok(Tool {
             name: row.get(0)?,

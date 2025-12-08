@@ -3,9 +3,8 @@ use actix_web::{
     Error, HttpMessage,
 };
 use futures_util::future::{ready, LocalBoxFuture, Ready};
-use platform::audit::{AuditLogger, AuditEventType};
+use platform::audit::AuditLogger;
 use std::sync::Arc;
-use std::net::IpAddr;
 
 #[derive(Clone)]
 pub struct SecurityAuditMiddleware {

@@ -33,3 +33,10 @@ max_backoff_ms = 8000
 [agents.llm_router_agent.circuit_breaker]
 failure_threshold = 4
 cooldown_ms = 45000
+
+[redis]
+url = "redis://redis:6379"  # Using service name for container networking
+pool_size = 20
+ttl_seconds = 3600  # 1 hour cache TTL
+connection_timeout_ms = 3000
+max_retries = 3

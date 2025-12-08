@@ -12,10 +12,8 @@ pub mod rate_limit;
 pub mod validation;
 pub mod ws;
 
-use audit_middleware::SecurityAuditMiddleware;
 use auth::JwtAuth;
-use rate_limit::{RateLimitConfig, RateLimitMiddleware};
-use validation::RequestValidationMiddleware;
+use rate_limit::RateLimitConfig;
 
 #[derive(Clone)]
 pub struct ApiContext {
@@ -26,6 +24,8 @@ pub struct ApiContext {
     pub jwt_auth: Option<Arc<JwtAuth>>,
     /// Rate limiting configuration
     pub rate_limit_config: RateLimitConfig,
+    /// Current application environment (dev, staging, prod)
+    pub app_env: String,
 }
 
 pub fn configure_http(cfg: &mut web::ServiceConfig, ctx: ApiContext) {
