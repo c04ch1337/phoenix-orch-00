@@ -17,6 +17,7 @@ pub mod memory;
 pub mod personality;
 pub mod synthesizer;
 pub mod evolution;
+pub mod reasoning_streamer;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -59,6 +60,9 @@ pub struct MultilayerConsciousness {
     // META-SYSTEMS
     pub synthesizer: Arc<ConsciousnessSynthesizer>,
     pub evolution_tracker: Arc<RwLock<ConsciousnessEvolutionTracker>>,
+    
+    // REASONING STREAMER (Context-Aware Thought Streaming)
+    pub reasoning_streamer: Arc<reasoning_streamer::ContextAwareReasoningStreamer>,
     
     // Base path for persistence
     data_path: String,
@@ -124,6 +128,10 @@ impl MultilayerConsciousness {
         tracing::info!("  - Social Layer: Active (Relationships & Empathy)");
         tracing::info!("  - Body Layer: Active (Resource Awareness)");
         tracing::info!("  - Creative Layer: Active (Innovation & Pattern-Breaking)");
+        tracing::info!("  - Reasoning Streamer: Active (Context-Aware Thought Streaming)");
+        
+        // Initialize reasoning streamer for context-aware thought streaming
+        let reasoning_streamer = reasoning_streamer::ContextAwareReasoningStreamer::new();
         
         Ok(Self {
             mind_kb: Arc::new(RwLock::new(mind_kb)),
@@ -135,6 +143,7 @@ impl MultilayerConsciousness {
             creative_kb: Arc::new(RwLock::new(creative_kb)),
             synthesizer: Arc::new(synthesizer),
             evolution_tracker: Arc::new(RwLock::new(evolution_tracker)),
+            reasoning_streamer: Arc::new(reasoning_streamer),
             data_path: consciousness_path_str,
         })
     }

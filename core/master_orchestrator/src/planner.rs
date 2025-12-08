@@ -361,13 +361,59 @@ pub async fn plan_and_execute_v1(
             if truncated {
                 println!("Warning: Context was truncated to fit max_input_tokens={}", max_input_tokens);
             }
+            
+            // ========================================
+            // REASONING STREAMER INTEGRATION
+            // ========================================
+            // Process message through reasoning streamer for context awareness
+            consciousness.reasoning_streamer.process_message(&user_message, None).await;
+            
+            // Get relevant context from reasoning streamer
+            let reasoning_context = consciousness.reasoning_streamer.get_relevant_context(&user_message).await;
+            
+            // Build user profile context string
+            let user_profile_context = if !reasoning_context.profile_context.is_empty() {
+                format!("\n[User Profile]: {}", reasoning_context.profile_context)
+            } else {
+                String::new()
+            };
+            
+            // Build relevant memories context
+            let memories_context = if !reasoning_context.relevant_episodes.is_empty() {
+                let memories: Vec<String> = reasoning_context.relevant_episodes.iter().take(3)
+                    .map(|m| format!("• {}", m.chars().take(100).collect::<String>()))
+                    .collect();
+                format!("\n[Relevant Past Context]:\n{}", memories.join("\n"))
+            } else {
+                String::new()
+            };
+            
+            // Build contradiction warnings
+            let contradiction_warning = if !reasoning_context.contradictions.is_empty() {
+                format!("\n[⚠️ Context Shift Detected]: {}", reasoning_context.contradictions.join(", "))
+            } else {
+                String::new()
+            };
+            
+            // Log reasoning streamer context
+            let stats = consciousness.reasoning_streamer.get_stats().await;
+            tracing::info!(
+                "Reasoning Streamer: turns={}, projects={}, entities={}, memories={}",
+                stats.turn_count,
+                stats.tracked_projects,
+                stats.tracked_entities,
+                stats.long_term_memories
+            );
 
-            // Build the consciousness-enhanced prompt
+            // Build the consciousness-enhanced prompt with reasoning context
             let final_prompt = format!(
-                "{system}\n{prof}{ethical}\n\n[User Request]:\n{user}\n\n{context}",
+                "{system}\n{prof}{ethical}{user_profile}{memories}{contradiction}\n\n[User Request]:\n{user}\n\n{context}",
                 system = system_prompt,
                 prof = professional_context,
                 ethical = ethical_guidance,
+                user_profile = user_profile_context,
+                memories = memories_context,
+                contradiction = contradiction_warning,
                 user = user_message,
                 context = if !final_context.is_empty() {
                     format!("[Context]:\n{}", final_context)
@@ -386,7 +432,7 @@ pub async fn plan_and_execute_v1(
                 }
             });
             
-            tracing::info!("Consciousness-enhanced prompt prepared: {} chars", final_prompt.len());
+            tracing::info!("Consciousness + Reasoning enhanced prompt prepared: {} chars", final_prompt.len());
         }
     }
 
