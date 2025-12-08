@@ -3,6 +3,10 @@ use serde_json::Value;
 use std::fmt;
 use uuid::Uuid;
 
+// Consciousness layer types for AGI personality
+pub mod consciousness;
+pub use consciousness::*;
+
 /// Arbitrary structured payload, whose schema depends on the agent and action.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Payload(pub Value);

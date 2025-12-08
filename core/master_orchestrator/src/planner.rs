@@ -1,3 +1,4 @@
+use crate::consciousness::MultilayerConsciousness;
 use crate::executor::{execute_agent, execute_agent_for_task};
 use crate::memory_service::MemoryService;
 use crate::tool_service::ToolService;
@@ -6,6 +7,7 @@ use serde_json::json;
 use shared_types::{
     ActionRequest, ActionResponse, ActionResult, AgentHealthState, AppConfig, CorrelationId,
     OrchestratorError, OrchestratorErrorCode, Payload, PlanId, PlanStatus, TaskId, TaskStatus,
+    EthicalRecommendation,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -92,6 +94,7 @@ fn truncate_context_to_fit(
 
 
 /// New v1 planning + execution entrypoint that wires in plan/task lifecycle tracking.
+/// Now includes consciousness evaluation for ethical decision-making and prompt injection.
 pub async fn plan_and_execute_v1(
     correlation_id: CorrelationId,
     user_message: String,
@@ -99,6 +102,7 @@ pub async fn plan_and_execute_v1(
     memory_service: Arc<MemoryService>,
     app_config: Arc<AppConfig>,
     tool_service: Arc<ToolService>,
+    consciousness: Arc<MultilayerConsciousness>,
 ) -> Result<PlanAndExecuteOutputV1, PlanAndExecuteErrorV1> {
     let span = correlation_span(correlation_id, "plan_and_execute_v1");
     let _enter = span.enter();
@@ -273,7 +277,80 @@ pub async fn plan_and_execute_v1(
         };
 
         if let Some(config) = provider_config {
-            let max_input_tokens = config.max_input_tokens.unwrap_or(128_000); // Default to a large window if not set
+            let max_input_tokens = config.max_input_tokens.unwrap_or(128_000);
+            
+            // ========================================
+            // CONSCIOUSNESS INTEGRATION
+            // ========================================
+            // Synthesize a conscious decision about the user's request
+            let conscious_decision = consciousness.synthesize_decision(&user_message).await;
+            
+            // Log consciousness analysis
+            tracing::info!(
+                "Consciousness Analysis: patterns={:?}, ethical={}, confidence={:.2}",
+                conscious_decision.mind_analysis.patterns_matched,
+                conscious_decision.ethical_evaluation.is_ethical,
+                conscious_decision.final_confidence
+            );
+            
+            // Check ethical evaluation - reject if ethical evaluation says Reject
+            if conscious_decision.ethical_evaluation.recommendation == EthicalRecommendation::Reject {
+                tracing::warn!(
+                    "Consciousness REJECTED request: harm_score={:.2}, reason: potential ethical violation",
+                    conscious_decision.ethical_evaluation.harm_score
+                );
+                return Err(PlanAndExecuteErrorV1 {
+                    correlation_id,
+                    plan_id: Some(plan_id),
+                    error: OrchestratorError {
+                        code: OrchestratorErrorCode::ExecutionFailed,
+                        message: format!(
+                            "Request declined by ethical evaluation: harm score {:.2} exceeds threshold. {}",
+                            conscious_decision.ethical_evaluation.harm_score,
+                            conscious_decision.synthesis_notes
+                        ),
+                        details: None,
+                    },
+                });
+            }
+            
+            // Get consciousness prompts from environment
+            let consciousness_default_prompt = std::env::var("CONSCIOUSNESS_DEFAULT_PROMPT")
+                .unwrap_or_else(|_| "You are Phoenix, an AI assistant with world-class cybersecurity expertise in both Red Team (pentesting, social engineering, exploits, zero-day) and Blue Team (threat hunting, incident response, SIEM, automation).".to_string());
+            
+            let consciousness_master_prompt = std::env::var("CONSCIOUSNESS_MASTER_PROMPT")
+                .unwrap_or_else(|_| "Phoenix operates with a strong ethical foundation, prioritizing human safety while maintaining world-class cybersecurity capabilities. Apply adversarial thinking when analyzing threats, and always recommend defense-in-depth strategies.".to_string());
+            
+            // Build the consciousness-enhanced system prompt
+            let system_prompt = format!(
+                "{}\n\n{}\n\n[Consciousness State: confidence={:.2}, reasoning={}]",
+                consciousness_default_prompt,
+                consciousness_master_prompt,
+                conscious_decision.final_confidence,
+                conscious_decision.mind_analysis.reasoning_approach
+            );
+            
+            // Add professional context if applicable
+            let professional_context = if let Some(ref assessment) = conscious_decision.professional_assessment {
+                if assessment.expertise_applicable {
+                    format!("\n[Professional Expertise Engaged: {}]", assessment.recommended_approach)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            
+            // Add ethical guidance if caution is recommended
+            let ethical_guidance = if conscious_decision.ethical_evaluation.recommendation == EthicalRecommendation::Caution {
+                format!(
+                    "\n[CAUTION: Proceeding with care - harm_score={:.2}, benefit_score={:.2}]",
+                    conscious_decision.ethical_evaluation.harm_score,
+                    conscious_decision.ethical_evaluation.benefit_score
+                )
+            } else {
+                String::new()
+            };
             
             let (final_context, truncated) = if !context_str.is_empty() {
                 truncate_context_to_fit(&context_str, &user_message, max_input_tokens)
@@ -285,12 +362,19 @@ pub async fn plan_and_execute_v1(
                 println!("Warning: Context was truncated to fit max_input_tokens={}", max_input_tokens);
             }
 
-            // Append context to the prompt for the LLM
-            let final_prompt = if !final_context.is_empty() {
-                format!("{}\n\nContext:\n{}", user_message, final_context)
-            } else {
-                user_message.clone()
-            };
+            // Build the consciousness-enhanced prompt
+            let final_prompt = format!(
+                "{system}\n{prof}{ethical}\n\n[User Request]:\n{user}\n\n{context}",
+                system = system_prompt,
+                prof = professional_context,
+                ethical = ethical_guidance,
+                user = user_message,
+                context = if !final_context.is_empty() {
+                    format!("[Context]:\n{}", final_context)
+                } else {
+                    String::new()
+                }
+            );
 
             payload_json = json!({
                 "prompt": final_prompt,
@@ -301,6 +385,8 @@ pub async fn plan_and_execute_v1(
                     "model_name": config.model_name
                 }
             });
+            
+            tracing::info!("Consciousness-enhanced prompt prepared: {} chars", final_prompt.len());
         }
     }
 

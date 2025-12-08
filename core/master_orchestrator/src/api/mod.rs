@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::memory_service::MemoryService;
 use crate::tool_service::ToolService;
+use crate::consciousness::MultilayerConsciousness;
 use shared_types::AppConfig;
 
 pub mod audit_middleware;
@@ -26,7 +27,10 @@ pub struct ApiContext {
     pub rate_limit_config: RateLimitConfig,
     /// Current application environment (dev, staging, prod)
     pub app_env: String,
+    /// Multi-dimensional consciousness architecture (always enabled)
+    pub consciousness: Arc<MultilayerConsciousness>,
 }
+
 
 pub fn configure_http(cfg: &mut web::ServiceConfig, ctx: ApiContext) {
     http::configure(cfg, ctx);

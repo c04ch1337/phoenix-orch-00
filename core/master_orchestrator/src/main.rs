@@ -7,6 +7,7 @@ use std::sync::Arc;
 mod api;
 mod cache_service;
 mod config_service;
+mod consciousness;
 mod executor;
 mod memory;
 mod memory_service;
@@ -14,6 +15,8 @@ mod planner;
 mod redis_service;
 mod tool_registry_service;
 mod tool_service;
+
+use consciousness::MultilayerConsciousness;
 
 use crate::api::ApiContext;
 use memory_service::MemoryService;
@@ -473,6 +476,49 @@ async fn main() -> std::io::Result<()> {
         Err(e) => eprintln!("Failed to get active agents: {}", e),
     }
 
+    // ===========================
+    // CONSCIOUSNESS ARCHITECTURE
+    // ===========================
+    // Initialize the Multi-Dimensional Consciousness Architecture
+    // Always enabled for consistent AGI personality and ethical decision-making
+    
+    // Get consciousness configuration from environment
+    let default_consciousness_path = project_root.join("data").to_string_lossy().to_string();
+    let consciousness_data_path = env::var("CONSCIOUSNESS_DATA_PATH")
+        .unwrap_or_else(|_| default_consciousness_path);
+    
+    let consciousness_default_prompt = env::var("CONSCIOUSNESS_DEFAULT_PROMPT")
+        .unwrap_or_else(|_| "You are Phoenix, an AI assistant with world-class cybersecurity expertise in both Red Team (pentesting, social engineering, exploits, zero-day) and Blue Team (threat hunting, incident response, SIEM, automation).".to_string());
+    
+    let consciousness_master_prompt = env::var("CONSCIOUSNESS_MASTER_PROMPT")
+        .unwrap_or_else(|_| "Phoenix operates with a strong ethical foundation, prioritizing human safety while maintaining world-class cybersecurity capabilities. Apply adversarial thinking when analyzing threats, and always recommend defense-in-depth strategies.".to_string());
+    
+    // Log consciousness configuration
+    println!("\n===== CONSCIOUSNESS ARCHITECTURE =====");
+    println!("Data Path: {}", consciousness_data_path);
+    println!("Default Prompt: {}...", &consciousness_default_prompt.chars().take(80).collect::<String>());
+    println!("Master Prompt: {}...", &consciousness_master_prompt.chars().take(80).collect::<String>());
+    
+    let consciousness = match MultilayerConsciousness::new(&consciousness_data_path).await {
+        Ok(c) => {
+            println!("✅ Consciousness Architecture initialized successfully");
+            Arc::new(c)
+        }
+        Err(e) => {
+            eprintln!("[FATAL] Failed to initialize Consciousness Architecture: {}", e);
+            return Ok(());
+        }
+    };
+    
+    // Print consciousness state summary
+    let state = consciousness.get_state_summary().await;
+    println!("  Active Layers: {:?}", state.active_layers);
+    println!("  Mind Focus: {:.0}%", state.mind_focus_level * 100.0);
+    println!("  Heart Compassion: {:.0}%", state.heart_compassion * 100.0);
+    println!("  Work Initialized: {}", state.work_initialized);
+    println!("  Evolution Score: {:.0}%", state.evolution_score * 100.0);
+    println!("=======================================\n");
+
     // --- (A) BINDING TO THE PERMANENT PORT ---
     // Bind to both IPv4 and IPv6 localhost interfaces
     const BIND_ADDRESS: &str = "127.0.0.1:8282";
@@ -533,6 +579,7 @@ async fn main() -> std::io::Result<()> {
         jwt_auth,
         rate_limit_config,
         app_env: app_env.clone(),
+        consciousness: consciousness.clone(),
     };
 
     // Build the frontend path from project root

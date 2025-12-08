@@ -1,6 +1,7 @@
 pub mod api;
 pub mod cache_service;
 pub mod config_service;
+pub mod consciousness;
 pub mod executor;
 pub mod memory;
 pub mod memory_service;

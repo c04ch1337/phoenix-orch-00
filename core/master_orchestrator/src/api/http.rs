@@ -120,6 +120,7 @@ async fn handle_chat(
             ctx.memory_service.clone(),
             ctx.app_config.clone(),
             ctx.tool_service.clone(),
+            ctx.consciousness.clone(),
         )
         .await;
 
