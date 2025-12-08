@@ -596,6 +596,12 @@ async fn main() -> std::io::Result<()> {
     println!("  Work Initialized: {}", state.work_initialized);
     println!("  Evolution Score: {:.0}%", state.evolution_score * 100.0);
     println!("=======================================\n");
+    
+    // Start consciousness auto-save background task
+    if auto_save_interval > 0 {
+        consciousness.clone().start_auto_save(auto_save_interval);
+        println!("🔄 Consciousness auto-save enabled ({}s interval)", auto_save_interval);
+    }
 
     // --- (A) BINDING TO THE PERMANENT PORT ---
     // Bind to both IPv4 and IPv6 localhost interfaces

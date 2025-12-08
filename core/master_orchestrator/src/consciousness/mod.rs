@@ -189,22 +189,75 @@ impl MultilayerConsciousness {
         }
     }
     
-    /// Persist current consciousness state
+    /// Persist current consciousness state (all 7 layers)
     pub async fn persist(&self) -> Result<(), String> {
-        // Persist each layer's state
+        let base_path = format!("{}/consciousness", self.data_path);
+        
+        // Persist core layers
         let mind = self.mind_kb.read().await;
-        mind.persist(&format!("{}/mind/state.json", self.data_path))?;
+        mind.persist(&format!("{}/mind/state.json", base_path))?;
+        drop(mind);
         
         let heart = self.heart_kb.read().await;
-        heart.persist(&format!("{}/heart/state.json", self.data_path))?;
+        heart.persist(&format!("{}/heart/state.json", base_path))?;
+        drop(heart);
         
         let work = self.work_kb.read().await;
-        work.persist(&format!("{}/work/state.json", self.data_path))?;
+        work.persist(&format!("{}/work/state.json", base_path))?;
+        drop(work);
         
+        // Persist extended layers
+        let soul = self.soul_kb.read().await;
+        soul.persist(&format!("{}/soul/state.json", base_path))?;
+        drop(soul);
+        
+        let social = self.social_kb.read().await;
+        social.persist(&format!("{}/social/state.json", base_path))?;
+        drop(social);
+        
+        let body = self.body_kb.read().await;
+        body.persist(&format!("{}/body/state.json", base_path))?;
+        drop(body);
+        
+        let creative = self.creative_kb.read().await;
+        creative.persist(&format!("{}/creative/state.json", base_path))?;
+        drop(creative);
+        
+        // Persist evolution tracker
         let tracker = self.evolution_tracker.read().await;
-        tracker.persist(&format!("{}/evolution.json", self.data_path))?;
+        tracker.persist(&format!("{}/evolution.json", base_path))?;
         
+        tracing::debug!("Consciousness state persisted to {}", base_path);
         Ok(())
+    }
+    
+    /// Start auto-save background task
+    pub fn start_auto_save(self: Arc<Self>, interval_seconds: u64) {
+        let consciousness = self.clone();
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(
+                std::time::Duration::from_secs(interval_seconds)
+            );
+            
+            tracing::info!(
+                "Consciousness auto-save started (interval: {}s)",
+                interval_seconds
+            );
+            
+            loop {
+                interval.tick().await;
+                
+                match consciousness.persist().await {
+                    Ok(_) => {
+                        tracing::debug!("Consciousness auto-save completed");
+                    }
+                    Err(e) => {
+                        tracing::error!("Consciousness auto-save failed: {}", e);
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -218,3 +271,4 @@ pub struct ConsciousnessStateSummary {
     pub work_initialized: bool,
     pub evolution_score: f32,
 }
+
