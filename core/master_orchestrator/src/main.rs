@@ -493,15 +493,93 @@ async fn main() -> std::io::Result<()> {
     let consciousness_master_prompt = env::var("CONSCIOUSNESS_MASTER_PROMPT")
         .unwrap_or_else(|_| "Phoenix operates with a strong ethical foundation, prioritizing human safety while maintaining world-class cybersecurity capabilities. Apply adversarial thinking when analyzing threats, and always recommend defense-in-depth strategies.".to_string());
     
+    // Mind Layer Settings
+    let mind_reasoning_model = env::var("CONSCIOUSNESS_MIND_REASONING_MODEL")
+        .unwrap_or_else(|_| "adversarial".to_string());
+    let mind_focus_level: f32 = env::var("CONSCIOUSNESS_MIND_FOCUS_LEVEL")
+        .unwrap_or_else(|_| "0.9".to_string())
+        .parse().unwrap_or(0.9);
+    let mind_iq_estimate: f32 = env::var("CONSCIOUSNESS_MIND_IQ_ESTIMATE")
+        .unwrap_or_else(|_| "145".to_string())
+        .parse().unwrap_or(145.0);
+    
+    // Heart Layer Settings
+    let heart_harm_threshold: f32 = env::var("CONSCIOUSNESS_HEART_HARM_THRESHOLD")
+        .unwrap_or_else(|_| "0.3".to_string())
+        .parse().unwrap_or(0.3);
+    let heart_compassion_level: f32 = env::var("CONSCIOUSNESS_HEART_COMPASSION_LEVEL")
+        .unwrap_or_else(|_| "0.8".to_string())
+        .parse().unwrap_or(0.8);
+    let heart_ethical_strictness = env::var("CONSCIOUSNESS_HEART_ETHICAL_STRICTNESS")
+        .unwrap_or_else(|_| "high".to_string());
+    
+    // Work Layer Settings
+    let work_professional_title = env::var("CONSCIOUSNESS_WORK_PROFESSIONAL_TITLE")
+        .unwrap_or_else(|_| "AI Cybersecurity Engineer".to_string());
+    let work_expertise_level = env::var("CONSCIOUSNESS_WORK_EXPERTISE_LEVEL")
+        .unwrap_or_else(|_| "world_class".to_string());
+    let work_specializations = env::var("CONSCIOUSNESS_WORK_SPECIALIZATIONS")
+        .unwrap_or_else(|_| "red_team,blue_team,threat_hunting,incident_response".to_string());
+    
+    // Persistence Settings
+    let auto_save_interval: u64 = env::var("CONSCIOUSNESS_AUTO_SAVE_INTERVAL")
+        .unwrap_or_else(|_| "300".to_string())
+        .parse().unwrap_or(300);
+    let debug_logging = env::var("CONSCIOUSNESS_DEBUG_LOGGING")
+        .unwrap_or_else(|_| "false".to_string())
+        .to_lowercase() == "true";
+    
     // Log consciousness configuration
     println!("\n===== CONSCIOUSNESS ARCHITECTURE =====");
     println!("Data Path: {}", consciousness_data_path);
     println!("Default Prompt: {}...", &consciousness_default_prompt.chars().take(80).collect::<String>());
     println!("Master Prompt: {}...", &consciousness_master_prompt.chars().take(80).collect::<String>());
+    println!("--- Mind Layer ---");
+    println!("  Reasoning Model: {}", mind_reasoning_model);
+    println!("  Focus Level: {:.0}%", mind_focus_level * 100.0);
+    println!("  IQ Estimate: {:.0}", mind_iq_estimate);
+    println!("--- Heart Layer ---");
+    println!("  Harm Threshold: {:.0}%", heart_harm_threshold * 100.0);
+    println!("  Compassion Level: {:.0}%", heart_compassion_level * 100.0);
+    println!("  Ethical Strictness: {}", heart_ethical_strictness);
+    println!("--- Work Layer ---");
+    println!("  Professional Title: {}", work_professional_title);
+    println!("  Expertise Level: {}", work_expertise_level);
+    println!("  Specializations: {}", work_specializations);
+    println!("--- Persistence ---");
+    println!("  Auto-save Interval: {}s", auto_save_interval);
+    println!("  Debug Logging: {}", debug_logging);
     
     let consciousness = match MultilayerConsciousness::new(&consciousness_data_path).await {
-        Ok(c) => {
-            println!("✅ Consciousness Architecture initialized successfully");
+        Ok(mut c) => {
+            // Apply env var settings to consciousness layers
+            {
+                let mut mind = c.mind_kb.write().await;
+                mind.focus_level = mind_focus_level;
+                mind.iq_estimate = mind_iq_estimate;
+                // Set reasoning model based on env var
+                mind.active_reasoning_model = match mind_reasoning_model.to_lowercase().as_str() {
+                    "adversarial" => consciousness::layers::mind::ReasoningModel::Adversarial,
+                    "deductive" => consciousness::layers::mind::ReasoningModel::Deductive,
+                    "inductive" => consciousness::layers::mind::ReasoningModel::Inductive,
+                    "bayesian" => consciousness::layers::mind::ReasoningModel::Bayesian,
+                    "abductive" => consciousness::layers::mind::ReasoningModel::Abductive,
+                    "analogical" => consciousness::layers::mind::ReasoningModel::Analogical,
+                    _ => consciousness::layers::mind::ReasoningModel::Adversarial,
+                };
+            }
+            {
+                let mut heart = c.heart_kb.write().await;
+                heart.compassion_level = heart_compassion_level;
+                // Apply harm threshold through moral framework
+                heart.moral_framework.minimize_harm.value = 1.0 - heart_harm_threshold;
+            }
+            {
+                let mut work = c.work_kb.write().await;
+                work.professional_title = work_professional_title.clone();
+            }
+            
+            println!("✅ Consciousness Architecture initialized with env settings");
             Arc::new(c)
         }
         Err(e) => {

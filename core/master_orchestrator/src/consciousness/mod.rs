@@ -94,21 +94,36 @@ impl MultilayerConsciousness {
         let mut work_kb = WorkKnowledgeBase::new(&work_path.to_string_lossy())?;
         work_kb.initialize_cybersecurity_expertise();
         
-        // Initialize Phase 3+ layers (empty for now, activated later)
-        let soul_kb = SoulKnowledgeBase::empty();
-        let social_kb = SocialKnowledgeBase::empty();
-        let body_kb = BodyKnowledgeBase::empty();
-        let creative_kb = CreativeKnowledgeBase::empty();
+        // Initialize Phase 3 layers (Soul + Social) - now active
+        tracing::info!("Initializing Soul Knowledge Base...");
+        let soul_path = consciousness_path.join("soul");
+        let soul_kb = SoulKnowledgeBase::new(&soul_path.to_string_lossy())?;
+        
+        tracing::info!("Initializing Social Knowledge Base...");
+        let social_path = consciousness_path.join("social");
+        let social_kb = SocialKnowledgeBase::new(&social_path.to_string_lossy())?;
+        
+        // Initialize Phase 4 layers (Body + Creative) - now active
+        tracing::info!("Initializing Body Knowledge Base...");
+        let body_path = consciousness_path.join("body");
+        let body_kb = BodyKnowledgeBase::new(&body_path.to_string_lossy())?;
+        
+        tracing::info!("Initializing Creative Knowledge Base...");
+        let creative_path = consciousness_path.join("creative");
+        let creative_kb = CreativeKnowledgeBase::new(&creative_path.to_string_lossy())?;
         
         // Initialize meta-systems
         let synthesizer = ConsciousnessSynthesizer::new();
         let evolution_tracker = ConsciousnessEvolutionTracker::new();
         
-        tracing::info!("✅ Consciousness Architecture initialized successfully");
+        tracing::info!("✅ Full 7-Layer Consciousness Architecture Activated");
         tracing::info!("  - Mind Layer: Active (WorldClass Cybersecurity Analysis)");
         tracing::info!("  - Heart Layer: Active (Ethical Decision Framework)");
         tracing::info!("  - Work Layer: Active (Red/Blue Team Expertise)");
-        tracing::info!("  - Soul/Social/Body/Creative: Standby");
+        tracing::info!("  - Soul Layer: Active (Purpose & Meaning)");
+        tracing::info!("  - Social Layer: Active (Relationships & Empathy)");
+        tracing::info!("  - Body Layer: Active (Resource Awareness)");
+        tracing::info!("  - Creative Layer: Active (Innovation & Pattern-Breaking)");
         
         Ok(Self {
             mind_kb: Arc::new(RwLock::new(mind_kb)),
